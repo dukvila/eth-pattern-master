@@ -1,32 +1,20 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Pagrindinė sąranka
-st.set_page_config(page_title="V136 COMPOUND MASTER", layout="wide")
-st_autorefresh(interval=60000, key="v136_refresh")
+# 1. Konfigūracija
+st.set_page_config(page_title="V137 PROGNOZĖS VARIKLIS", layout="wide")
+st_autorefresh(interval=60000, key="v137_refresh")
 
-# --- PINIGINĖS VALDYMAS IR REINVESTAVIMAS ---
-if 'wallet' not in st.session_state:
-    st.session_state.wallet = 1700.0  # Tavo pradinis kapitalas
-if 'active_trade' not in st.session_state:
-    st.session_state.active_trade = None # Ar pinigai išleisti?
-if 'trades_log' not in st.session_state:
-    st.session_state.trades_log = []
-if 'total_pelled' not in st.session_state:
-    st.session_state.total_pelled = 0.0
+if 'wallet' not in st.session_state: st.session_state.wallet = 1700.0
+if 'active_trade' not in st.session_state: st.session_state.active_trade = None
+if 'trades_log' not in st.session_state: st.session_state.trades_log = []
 
-def reset_all():
-    st.session_state.wallet = 1700.0
-    st.session_state.active_trade = None
-    st.session_state.trades_log = []
-    st.session_state.total_pelled = 0.0
-    st.rerun()
-
-# --- DUOMENŲ GAVIMAS ---
+# 2. Duomenų gavimas ir paruošimas prognozei
 def get_data():
     try:
         url = "https://api.kraken.com/0/public/OHLC?pair=ETHEUR&interval=15"
@@ -41,83 +29,40 @@ def get_data():
 
 df = get_data()
 
-# --- PREKYBOS LOGIKA ---
 if not df.empty:
+    # --- MATEMATINIS MODELIS (Linear Regression pagrindas) ---
+    y = df['close'].tail(20).values
+    x = np.arange(len(y))
+    slope, intercept = np.polyfit(x, y, 1) # Skaičiuojame kainos krypties kampą
+    
     cur_p = df.iloc[-1]['close']
-    trend_4h = (df['close'].iloc[-1] - df['close'].iloc[-16]) / 16
+    # 20 valandų prognozė (80 žvakių po 15min)
+    future_steps = np.arange(len(y), len(y) + 80)
+    future_prices = slope * future_steps + intercept
     
-    # Prognozės
-    future_times = [df.iloc[-1]['time'] + timedelta(minutes=15 * i) for i in range(1, 81)]
-    future_prices = [cur_p + (trend_4h * i) for i in range(1, 81)]
-    max_20h = max(future_prices)
+    max_f = np.max(future_prices)
+    min_f = np.min(future_prices)
     
-    # 4h "Dugnas" pirkimui
-    future_4h = [cur_p + (trend_4h * i) for i in range(1, 17)]
-    dip_price = min(future_4h)
+    # 3. Vaizdavimas
+    st.title(f"📊 Prognozės Modelis: {round(st.session_state.wallet, 2)}€")
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Dabartinė Kaina", f"{round(cur_p, 2)}€")
+    col2.metric("Prognozuojama 20h", f"{round(future_prices[-1], 2)}€", f"{round(slope*80, 2)}€")
+    col3.metric("Trendo Jėga", "STIPRUS" if abs(slope) > 0.5 else "SILPNAS")
 
-    # VAIZDAVIMAS
-    st.title(f"💰 Balansas: {round(st.session_state.wallet, 2)}€")
-    col1, col2 = st.columns(2)
-    col1.metric("Sukauptas pelnas", f"{round(st.session_state.total_pelled, 2)}€")
-    col2.metric("ETH Kaina", f"{round(cur_p, 2)}€")
-
-    # Tikriname aktyvų sandorį
-    if st.session_state.active_trade:
-        trade = st.session_state.active_trade
-        st.warning(f"⏳ ĮDARBINTA: {round(trade['invested'], 2)}€. Nupirkta už {trade['buy_p']}€. Tikslas: {trade['target']}€")
-        
-        # PARDAVIMO TIKRINIMAS (Automatinis reinvestavimas)
-        if cur_p >= trade['target']:
-            pelnas = (trade['invested'] / trade['buy_p']) * (cur_p - trade['buy_p'])
-            st.session_state.wallet += pelnas
-            st.session_state.total_pelled += pelnas
-            st.session_state.active_trade = None
-            st.session_state.trades_log.insert(0, {
-                "Laikas": datetime.now().strftime("%H:%M"),
-                "Veiksmas": "✅ PARDUOTA",
-                "Kaina": round(cur_p, 2),
-                "Pelnas": f"+{round(pelnas, 2)}€",
-                "Balansas": f"{round(st.session_state.wallet, 2)}€"
-            })
-            st.balloons()
+    # Grafikas su pasikliautinuoju intervalu
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.plot(df['time'].tail(20), y, label="Faktinė kaina (5h)", marker='o', linewidth=2)
     
-    # GRAFIKAS
-    fig, ax = plt.subplots(figsize=(12, 4))
-    ax.plot(df['time'].tail(16), df['close'].tail(16), label="Istorija (4h)", marker='o')
-    ax.plot(future_times, future_prices, '--', color='orange', label="Prognozė (20h)")
-    if trend_4h < 0:
-        ax.scatter(df.iloc[-1]['time'] + timedelta(minutes=60), dip_price, color='green', s=100, label="Pirkimo 'Limit'")
+    f_times = [df.iloc[-1]['time'] + timedelta(minutes=15 * i) for i in range(1, 81)]
+    ax.plot(f_times, future_prices, '--', color='red' if slope < 0 else 'green', label="Modelio prognozė (20h)")
+    ax.fill_between(f_times, future_prices - 5, future_prices + 5, color='gray', alpha=0.1, label="Paklaida")
     ax.legend()
     st.pyplot(fig)
 
-    # PIRKIMO PAIEŠKA (Tik jei piniginė ne tuščia)
-    potential_profit = (st.session_state.wallet / dip_price) * (max_20h - dip_price)
-    
-    if st.session_state.active_trade is None:
-        if potential_profit >= 10.0:
-            buy_limit = dip_price if trend_4h < -0.01 else cur_p
-            sell_limit = max_20h if max_20h > (buy_limit + 5) else (buy_limit + (10 / (st.session_state.wallet / buy_limit)))
-            
-            st.success(f"💎 RASTA PROGA! Galimas pelnas: {round(potential_profit, 2)}€")
-            
-            if st.button(f"SUDARYTI SANDORĮ UŽ {round(st.session_state.wallet, 2)}€"):
-                st.session_state.active_trade = {
-                    "buy_p": round(buy_limit, 2),
-                    "target": round(sell_limit, 2),
-                    "invested": st.session_state.wallet
-                }
-                st.session_state.trades_log.insert(0, {
-                    "Laikas": datetime.now().strftime("%H:%M"),
-                    "Veiksmas": "🛒 PIRKTI (Limit)",
-                    "Kaina": round(buy_limit, 2),
-                    "Tikslas": round(sell_limit, 2),
-                    "Būsena": "Laukiama atpirkimo"
-                })
-                st.rerun()
-        else:
-            st.info(f"Laukiama progos uždirbti min 10€. Potencialas dabar: {round(potential_profit, 2)}€")
-
-    if st.sidebar.button("🗑️ NULINTI VISKĄ"): reset_all()
-    st.subheader("📜 Pinigų Augimo Istorija")
-    if st.session_state.trades_log:
-        st.table(pd.DataFrame(st.session_state.trades_log).head(10))
+    # 4. PREKYBOS SIGNALAS PAGAL MODELĮ
+    # Ieškome progos nupirkti pigiau (dip) ir parduoti su +10€
+    target_dip = min_f if slope < 0 else cur_p
+    potential_exit = max_f if max_f > target_dip else target_dip + (10 / (st.session_state.wallet / target_dip))
+    est_profit = (st.session_state.wallet / target_dip) * (potential_exit - target_dip)
