@@ -7,11 +7,12 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="ETH PRO-TRADER V95", layout="wide")
-st_autorefresh(interval=60000, key="v95_refresh")
+# 1. Konfigūracija
+st.set_page_config(page_title="ETH V100 VALIDATOR", layout="wide")
+st_autorefresh(interval=60000, key="v100_refresh")
 
-if 'history' not in st.session_state:
-    st.session_state.history = []
+if 'trades_log' not in st.session_state:
+    st.session_state.trades_log = []
 
 def get_live_data():
     try:
@@ -28,68 +29,54 @@ def get_live_data():
 
 df = get_live_data()
 
-def analyze_pro_logic(data):
+def analyze_v100(data):
     if data.empty: return None
     l, p = data.iloc[-1], data.iloc[-2]
     
-    # Indikatoriai tikslumui
+    # Indikatoriai
     delta = data['close'].diff()
     gain = delta.where(delta > 0, 0).rolling(window=14).mean().iloc[-1]
     loss = -delta.where(delta < 0, 0).rolling(window=14).mean().iloc[-1]
     rsi = 100 - (100 / (1 + (gain / loss))) if loss > 0 else 50
-    volatility = data['close'].tail(10).std()
+    vol = data['close'].tail(8).std()
 
     cur_p = l['close']
-    score, cmd = 0, "LAUKTI"
+    score, cmd = 0, "STEBĖTI"
     
-    # 1. PIRKIMO LOGIKA
-    if l['close'] > l['open'] and l['close'] > p['open'] and rsi < 60:
-        score, cmd = 3.0, "🟢 PIRKTI"
-    # 2. PARDAVIMO LOGIKA
-    elif l['close'] < l['open'] and l['close'] < p['open'] and rsi > 40:
-        score, cmd = -3.0, "🔴 PARDUOTI"
+    # Griežta logika
+    if l['close'] > l['open'] and l['close'] > p['open'] and rsi < 65:
+        score, cmd = 3.2, "🟢 PIRKTI"
+    elif l['close'] < l['open'] and l['close'] < p['open'] and rsi > 35:
+        score, cmd = -3.2, "🔴 PARDUOTI"
 
-    # STRATEGIJOS APSKAIČIAVIMAS (Tavo prašyti skaičiai)
-    tp1 = cur_p + (volatility * 1.5)  # Pirmas pelnas (Saugus)
-    tp2 = cur_p + (volatility * 3.0)  # Antras pelnas (Agresyvus)
-    sl = cur_p - (volatility * 2.0)   # Stop Loss (Rizikos riba)
+    # Tikslai ir rizika
+    tp = cur_p + (vol * 2.5) if score > 0 else cur_p - (vol * 2.5)
+    sl = cur_p - (vol * 1.8) if score > 0 else cur_p + (vol * 1.8)
     
-    risk_level = "Aukšta" if volatility > 5 else "Vidutinė" if volatility > 2 else "Žema"
-    win_rate = min(95.0, abs(score)*25 + (rsi if score > 0 else 100-rsi)/2)
+    # Validacijos įrašas
+    now = datetime.now()
+    if not st.session_state.trades_log or st.session_state.trades_log[0]['Laikas'] != now.strftime("%H:%M"):
+        st.session_state.trades_log.insert(0, {
+            "Laikas": now.strftime("%H:%M"),
+            "Signal": cmd,
+            "Kaina": cur_p,
+            "Rezultatas": "Tikrinama..."
+        })
 
-    return {
-        "cmd": cmd, "price": cur_p, "rsi": rsi, "tp1": tp1, "tp2": tp2, 
-        "sl": sl, "risk": risk_level, "win": win_rate, "score": score
-    }
+    return {"cmd": cmd, "p": cur_p, "rsi": rsi, "tp": tp, "sl": sl, "score": score, "vol": vol}
 
-res = analyze_pro_logic(df)
+res = analyze_v100(df)
 
 if res:
-    color = "#28a745" if "PIRKTI" in res['cmd'] else "#dc3545" if "PARDUOTI" in res['cmd'] else "#343a40"
-    
+    # Vizualinis skydas
+    color = "#28a745" if "PIRKTI" in res['cmd'] else "#dc3545" if "PARDUOTI" in res['cmd'] else "#f39c12"
     st.markdown(f"""
-    <div style="background-color:{color}; padding:25px; border-radius:15px; color:white; border: 5px solid white;">
-        <h1 style="text-align:center; margin:0;">{res['cmd']} | {res['price']:.2f}€</h1>
-        <div style="display:flex; justify-content:space-around; margin-top:20px; font-weight:bold; background:rgba(0,0,0,0.2); padding:15px; border-radius:10px;">
-            <div style="text-align:center;">🎯 TARGET 1 (Pelnas 1)<br><span style="font-size:24px;">{res['tp1']:.2f}€</span></div>
-            <div style="text-align:center;">🚀 TARGET 2 (Pelnas 2)<br><span style="font-size:24px;">{res['tp2']:.2f}€</span></div>
-            <div style="text-align:center;">🛡️ STOP LOSS (Rizika)<br><span style="font-size:24px;">{res['sl']:.2f}€</span></div>
-        </div>
-        <p style="text-align:center; margin-top:15px; font-size:18px;">
-            Tikimybė: {res['win']:.1f}% | Rizika: {res['risk']} | RSI: {res['rsi']:.1f}
-        </p>
+    <div style="background-color:{color}; padding:20px; border-radius:15px; color:white; text-align:center; border: 4px solid white;">
+        <h1 style="margin:0;">{res['cmd']} | {res['p']:.2f}€</h1>
+        <p style="font-size:20px;">Target: {res['tp']:.2f}€ | Stop Loss: {res['sl']:.2f}€ | RSI: {res['rsi']:.1f}</p>
     </div>
     """, unsafe_allow_html=True)
 
-    # Grafikas su vizualiomis pelno linijomis
+    # GRAFIKAS: 2 valandų istorija + paros prognozė
     fig, ax = plt.subplots(figsize=(12, 5), facecolor='black')
-    ax.set_facecolor('#0a0a0a')
-    ax.plot(df['time'].tail(30), df['close'].tail(30), color='white', alpha=0.5)
-    
-    # Vizualios prekybos zonos
-    ax.axhline(res['tp1'], color='#00ffcc', linestyle='--', label="TP1")
-    ax.axhline(res['tp2'], color='#28a745', linestyle='--', label="TP2")
-    ax.axhline(res['sl'], color='#ff4b4b', linestyle=':', label="SL")
-    
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
+    ax
