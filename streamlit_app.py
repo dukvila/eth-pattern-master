@@ -7,8 +7,7 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Konfigūracija
-st.set_page_config(page_title="ETH V105 TRUST-METRIC", layout="wide")
+st.set_page_config(page_title="ETH V105 TRUST-FIX", layout="wide")
 st_autorefresh(interval=60000, key="v105_refresh")
 
 if 'trades_log' not in st.session_state:
@@ -31,81 +30,48 @@ def get_live_data():
 
 df = get_live_data()
 
-def analyze_v105(data):
+def analyze_logic(data):
     if data.empty: return None
     l, p = data.iloc[-1], data.iloc[-2]
-    
-    delta = data['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean().iloc[-1]
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean().iloc[-1]
-    rsi = 100 - (100 / (1 + (gain / loss))) if loss > 0 else 50
-    vol = data['close'].tail(12).std()
-
     cur_p = l['close']
-    score, cmd = 0, "STEBĖTI"
+    vol = data['close'].tail(12).std()
     
-    if l['close'] > l['open'] and l['close'] > p['open'] and rsi < 60:
-        score, cmd = 3.5, "🟢 PIRKTI"
-    elif l['close'] < l['open'] and l['close'] < p['open'] and rsi > 40:
-        score, cmd = -3.5, "🔴 PARDUOTI"
+    # Paprasta bet tvirta pirkimo logika
+    cmd = "STEBĖTI"
+    score = 0
+    if l['close'] > l['open'] and l['close'] > p['open']:
+        cmd, score = "🟢 PIRKTI", 3.5
+    elif l['close'] < l['open'] and l['close'] < p['open']:
+        cmd, score = "🔴 PARDUOTI", -3.5
 
     tp = cur_p + (vol * 2.2) if score > 0 else cur_p - (vol * 2.2)
     sl = cur_p - (vol * 1.5) if score > 0 else cur_p + (vol * 1.5)
     
     now_str = datetime.now().strftime("%H:%M")
     
-    for trade in st.session_state.trades_log:
-        if trade['Rezultatas'] == "Tikrinama...":
-            if (trade['Signal'] == "🟢 PIRKTI" and cur_p >= trade['TP']):
-                trade['Rezultatas'] = "✅ LAIMĖTA"
+    # Rezultatų tikrinimas
+    for t in st.session_state.trades_log:
+        if t['Rezultatas'] == "Tikrinama...":
+            if (t['Signal'] == "🟢 PIRKTI" and cur_p >= t['TP']):
+                t['Rezultatas'] = "✅ LAIMĖTA"
                 st.session_state.stats["Laimėta"] += 1
-            elif (trade['Signal'] == "🟢 PIRKTI" and cur_p <= trade['SL']):
-                trade['Rezultatas'] = "❌ STOP LOSS"
-            elif (trade['Signal'] == "🔴 PARDUOTI" and cur_p <= trade['TP']):
-                trade['Rezultatas'] = "✅ LAIMĖTA"
+            elif (t['Signal'] == "🟢 PIRKTI" and cur_p <= t['SL']):
+                t['Rezultatas'] = "❌ STOP LOSS"
+            elif (t['Signal'] == "🔴 PARDUOTI" and cur_p <= t['TP']):
+                t['Rezultatas'] = "✅ LAIMĖTA"
                 st.session_state.stats["Laimėta"] += 1
-            elif (trade['Signal'] == "🔴 PARDUOTI" and cur_p >= trade['SL']):
-                trade['Rezultatas'] = "❌ STOP LOSS"
+            elif (t['Signal'] == "🔴 PARDUOTI" and cur_p >= t['SL']):
+                t['Rezultatas'] = "❌ STOP LOSS"
 
     if not st.session_state.trades_log or st.session_state.trades_log[0]['Laikas'] != now_str:
         if cmd != "STEBĖTI":
             st.session_state.stats["Viso"] += 1
-            st.session_state.trades_log.insert(0, {
-                "Laikas": now_str, "Signal": cmd, "Kaina": cur_p, 
-                "TP": tp, "SL": sl, "Rezultatas": "Tikrinama..."
-            })
+            st.session_state.trades_log.insert(0, {"Laikas": now_str, "Signal": cmd, "Kaina": cur_p, "TP": tp, "SL": sl, "Rezultatas": "Tikrinama..."})
 
-    return {"cmd": cmd, "p": cur_p, "rsi": rsi, "tp": tp, "sl": sl, "score": score}
+    return {"cmd": cmd, "p": cur_p, "tp": tp, "sl": sl, "score": score}
 
-res = analyze_v105(df)
+res = analyze_logic(df)
 
 if res:
-    win_rate = (st.session_state.stats["Laimėta"] / st.session_state.stats["Viso"] * 100) if st.session_state.stats["Viso"] > 0 else 0
-    st.markdown(f"""
-        <div style="background-color:#1e1e1e; padding:10px; border-radius:10px; text-align:center; border: 1px solid #444; margin-bottom:10px;">
-            <span style="color:white; font-size:20px;">📊 Sistemos Patikimumas: </span>
-            <span style="color:#00ffcc; font-size:25px; font-weight:bold;">{win_rate:.1f}%</span>
-            <span style="color:#888; margin-left:15px;">(Laimėta: {st.session_state.stats['Laimėta']} iš {st.session_state.stats['Viso']})</span>
-        </div>
-    """, unsafe_allow_html=True)
-
-    color = "#28a745" if "PIRKTI" in res['cmd'] else "#dc3545" if "PARDUOTI" in res['cmd'] else "#343a40"
-    st.markdown(f"""
-    <div style="background-color:{color}; padding:20px; border-radius:15px; color:white; text-align:center; border: 4px solid white;">
-        <h1 style="margin:0;">{res['cmd']} | {res['p']:.2f}€</h1>
-        <p style="font-size:18px;">🎯 Target: {res['tp']:.2f}€ | 🛡️ Stop Loss: {res['sl']:.2f}€</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    fig, ax = plt.subplots(figsize=(12, 5))
-    fig.patch.set_facecolor('black')
-    ax.set_facecolor('#0a0a0a')
-    hist_df = df.tail(8)
-    ax.plot(hist_df['time'], hist_df['close'], color='white', linewidth=2)
-    
-    last_time = df['time'].iloc[-1]
-    fut_times = [last_time + timedelta(minutes=15*i) for i in range(1, 25)]
-    fut_prices = [res['p'] + (res['score'] * i * 0.4) for i in range(1, 25)]
-    ax.plot(fut_times, fut_prices, color='#00ffcc', linestyle='--', linewidth=3)
-    
-    ax.axhline(res['tp'], color='#2ECC
+    wr = (st.session_state.stats["Laimėta"] / st.session_state.stats["Viso"] * 100) if st.session_state.stats["Viso"] > 0 else 0
+    st.subheader(f"📊 Patikimumas: {wr:.1f}% (Laimėta {st.session_state.stats['Laimėta']} iš {st.session_state.stats['Viso']})")
