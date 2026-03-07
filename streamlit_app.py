@@ -6,14 +6,19 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Konfigūracija
-st.set_page_config(page_title="ETH V109 PRO-ACCOUNTANT", layout="wide")
-st_autorefresh(interval=60000, key="v109_refresh")
+st.set_page_config(page_title="ETH V110 REAL-CAPITAL", layout="wide")
+st_autorefresh(interval=60000, key="v110_refresh")
 
-# SAUGIKLIS: Išvalome seną atmintį, kad pridėtume naują stulpelį "Pelnas/Nuostolis"
-if 'trades_log' in st.session_state and len(st.session_state.trades_log) > 0:
-    if "Pelnas/Nuostolis" not in st.session_state.trades_log[0]:
-        st.session_state.trades_log = []
-        st.session_state.stats = {"Laimėta": 0, "Viso": 0}
+# Šoninė juosta nustatymams
+st.sidebar.header("💰 Piniginės nustatymai")
+if 'balance' not in st.session_state:
+    st.session_state.balance = 1000.0  # Pradinė suma
+
+new_balance = st.sidebar.number_input("Tavo turima suma (€):", value=st.session_state.balance, step=10.0)
+if new_balance != st.session_state.balance:
+    st.session_state.balance = new_balance
+    st.session_state.trades_log = [] # Išvalom, jei keičiam biudžetą
+    st.session_state.stats = {"Laimėta": 0, "Viso": 0}
 
 if 'trades_log' not in st.session_state:
     st.session_state.trades_log = []
@@ -48,34 +53,45 @@ if not df.empty:
     tp = cur_p + (vol * 2.1) if "PIRKTI" in cmd else cur_p - (vol * 2.1)
     sl = cur_p - (vol * 1.5) if "PIRKTI" in cmd else cur_p + (vol * 1.5)
     
-    # Rezultatų tikrinimas ir pelno skaičiavimas
+    # Rezultatų tikrinimas ir Piniginės atnaujinimas
     for t in st.session_state.trades_log:
         if t['Rezultatas'] == "Tikrinama...":
-            pelnas = 0
+            rez = 0
+            baigta = False
             if (t['Signal'] == "🟢 PIRKTI" and cur_p >= t['Tikslas (TP)']):
+                rez = (t['Kiekis (ETH)'] * t['Tikslas (TP)']) - t['Investuota']
                 t['Rezultatas'] = "✅ LAIMĖTA"
-                t['Pelnas/Nuostolis'] = f"+{round(t['Tikslas (TP)'] - t['Kaina (Įėjimas)'], 2)}€"
-                st.session_state.stats["Laimėta"] += 1
+                baigta = True
             elif (t['Signal'] == "🟢 PIRKTI" and cur_p <= t['Riba (SL)']):
+                rez = (t['Kiekis (ETH)'] * t['Riba (SL)']) - t['Investuota']
                 t['Rezultatas'] = "❌ STOP LOSS"
-                t['Pelnas/Nuostolis'] = f"{round(t['Riba (SL)'] - t['Kaina (Įėjimas)'], 2)}€"
+                baigta = True
             elif (t['Signal'] == "🔴 PARDUOTI" and cur_p <= t['Tikslas (TP)']):
+                rez = t['Investuota'] - (t['Kiekis (ETH)'] * t['Tikslas (TP)'])
                 t['Rezultatas'] = "✅ LAIMĖTA"
-                t['Pelnas/Nuostolis'] = f"+{round(t['Kaina (Įėjimas)'] - t['Tikslas (TP)'], 2)}€"
-                st.session_state.stats["Laimėta"] += 1
+                baigta = True
             elif (t['Signal'] == "🔴 PARDUOTI" and cur_p >= t['Riba (SL)']):
+                rez = t['Investuota'] - (t['Kiekis (ETH)'] * t['Riba (SL)'])
                 t['Rezultatas'] = "❌ STOP LOSS"
-                t['Pelnas/Nuostolis'] = f"{round(t['Kaina (Įėjimas)'] - t['Riba (SL)'], 2)}€"
+                baigta = True
+            
+            if baigta:
+                st.session_state.balance += rez
+                t['Pelnas/Nuostolis'] = f"{round(rez, 2)}€"
+                if "✅" in t['Rezultatas']: st.session_state.stats["Laimėta"] += 1
 
-    # Žurnalo pildymas
+    # Naujo sandorio kūrimas
     now_t = datetime.now().strftime("%H:%M")
     if not st.session_state.trades_log or st.session_state.trades_log[0]['Laikas'] != now_t:
-        if cmd != "STEBĖTI":
+        if cmd != "STEBĖTI" and st.session_state.balance > 10:
+            invest = st.session_state.balance # Investuojam viską, kas yra piniginėje
+            kiekis = invest / cur_p
             st.session_state.stats["Viso"] += 1
             st.session_state.trades_log.insert(0, {
                 "Laikas": now_t, 
                 "Signal": cmd, 
-                "Kaina (Įėjimas)": round(cur_p, 2), 
+                "Investuota": round(invest, 2),
+                "Kiekis (ETH)": round(kiekis, 4),
                 "Tikslas (TP)": round(tp, 2), 
                 "Riba (SL)": round(sl, 2), 
                 "Pelnas/Nuostolis": "—",
@@ -83,18 +99,16 @@ if not df.empty:
             })
 
     # --- VAIZDAVIMAS ---
-    wr = (st.session_state.stats["Laimėta"] / st.session_state.stats["Viso"] * 100) if st.session_state.stats["Viso"] > 0 else 0
-    st.title(f"📊 Patikimumas: {wr:.1f}%")
-    st.info(f"Dabartinė ETH Kaina: {cur_p:.2f}€ | Signalas: {cmd}")
+    st.header(f"💼 Piniginė: {round(st.session_state.balance, 2)}€")
     
-    # Išplėstas žurnalas
-    st.write("### 📜 Detalus Prekybos Žurnalas")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Sistemos Patikimumas", f"{ (st.session_state.stats['Laimėta']/st.session_state.stats['Viso']*100 if st.session_state.stats['Viso']>0 else 0):.1f}%")
+    with col2:
+        profit_total = st.session_state.balance - new_balance
+        st.metric("Bendras Pelnas", f"{round(profit_total, 2)}€", delta=f"{round(profit_total, 2)}€")
+
+    st.write("### 📜 Detali Prekybos Ataskaita")
     if st.session_state.trades_log:
         log_df = pd.DataFrame(st.session_state.trades_log)
-        st.table(log_df[['Laikas', 'Signal', 'Kaina (Įėjimas)', 'Tikslas (TP)', 'Riba (SL)', 'Pelnas/Nuostolis', 'Rezultatas']].head(15))
-
-    # Grafikas apačioje
-    fig, ax = plt.subplots(figsize=(10, 3))
-    ax.plot(df['time'].tail(20), df['close'].tail(20), label='Kaina', marker='o', markersize=3)
-    ax.legend()
-    st.pyplot(fig)
+        st.table(log_df[['Laikas', 'Signal', 'Investuota', 'Kiekis (ETH)', 'Tikslas (TP)', 'Riba (SL)', 'Pelnas/Nuostolis', 'Rezultatas']].head(15))
