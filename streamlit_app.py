@@ -6,8 +6,14 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Konfigūracija
-st.set_page_config(page_title="ETH V107 PRO-LOG", layout="wide")
-st_autorefresh(interval=60000, key="v107_refresh")
+st.set_page_config(page_title="ETH V108 PRO-VIEW", layout="wide")
+st_autorefresh(interval=60000, key="v108_refresh")
+
+# SAUGIKLIS: Jei keičiasi lentelės struktūra, išvalome seną atmintį
+if 'trades_log' in st.session_state and len(st.session_state.trades_log) > 0:
+    if "Tikslas (TP)" not in st.session_state.trades_log[0]:
+        st.session_state.trades_log = []
+        st.session_state.stats = {"Laimėta": 0, "Viso": 0}
 
 if 'trades_log' not in st.session_state:
     st.session_state.trades_log = []
@@ -62,7 +68,7 @@ if not df.empty:
             st.session_state.trades_log.insert(0, {
                 "Laikas": now_t, 
                 "Signal": cmd, 
-                "Kaina": round(cur_p, 2), 
+                "Kaina (Įėjimas)": round(cur_p, 2), 
                 "Tikslas (TP)": round(tp, 2), 
                 "Riba (SL)": round(sl, 2), 
                 "Rezultatas": "Tikrinama..."
@@ -70,14 +76,15 @@ if not df.empty:
 
     # --- VAIZDAVIMAS ---
     wr = (st.session_state.stats["Laimėta"] / st.session_state.stats["Viso"] * 100) if st.session_state.stats["Viso"] > 0 else 0
-    st.title(f"📈 Patikimumas: {wr:.1f}%")
-    st.info(f"Dabartinis Signalas: {cmd} | Kaina: {cur_p:.2f}€")
+    st.title(f"📊 Patikimumas: {wr:.1f}%")
+    st.info(f"Dabartinė ETH Kaina: {cur_p:.2f}€ | Signalas: {cmd}")
     
     # Grafikas
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(df['time'].tail(15), df['close'].tail(15), label='ETH Kaina', marker='o')
-    ax.axhline(tp, color='green', linestyle='--', alpha=0.5, label='Target')
-    ax.axhline(sl, color='red', linestyle='--', alpha=0.5, label='Stop')
+    ax.plot(df['time'].tail(20), df['close'].tail(20), label='Kaina', marker='o', markersize=4)
+    if cmd != "STEBĖTI":
+        ax.axhline(tp, color='green', linestyle='--', alpha=0.6, label='Tikslas')
+        ax.axhline(sl, color='red', linestyle='--', alpha=0.6, label='Riba')
     ax.legend()
     st.pyplot(fig)
 
@@ -85,4 +92,5 @@ if not df.empty:
     st.write("### 📜 Detalus Prekybos Žurnalas")
     if st.session_state.trades_log:
         log_df = pd.DataFrame(st.session_state.trades_log)
-        st.table(log_df[['Laikas', 'Signal', 'Kaina', 'Tikslas (TP)', 'Riba (SL)', 'Rezultatas']].head(10))
+        # Rodome visus tavo prašomus stulpelius
+        st.table(log_df[['Laikas', 'Signal', 'Kaina (Įėjimas)', 'Tikslas (TP)', 'Riba (SL)', 'Rezultatas']].head(15))
