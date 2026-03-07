@@ -54,7 +54,6 @@ def analyze_v105(data):
     
     now_str = datetime.now().strftime("%H:%M")
     
-    # Tikriname senus signalus ir atnaujiname statistiką
     for trade in st.session_state.trades_log:
         if trade['Rezultatas'] == "Tikrinama...":
             if (trade['Signal'] == "🟢 PIRKTI" and cur_p >= trade['TP']):
@@ -68,7 +67,6 @@ def analyze_v105(data):
             elif (trade['Signal'] == "🔴 PARDUOTI" and cur_p >= trade['SL']):
                 trade['Rezultatas'] = "❌ STOP LOSS"
 
-    # Įrašome naują signalą
     if not st.session_state.trades_log or st.session_state.trades_log[0]['Laikas'] != now_str:
         if cmd != "STEBĖTI":
             st.session_state.stats["Viso"] += 1
@@ -82,7 +80,6 @@ def analyze_v105(data):
 res = analyze_v105(df)
 
 if res:
-    # 🏆 SĖKMĖS STATISTIKA
     win_rate = (st.session_state.stats["Laimėta"] / st.session_state.stats["Viso"] * 100) if st.session_state.stats["Viso"] > 0 else 0
     st.markdown(f"""
         <div style="background-color:#1e1e1e; padding:10px; border-radius:10px; text-align:center; border: 1px solid #444; margin-bottom:10px;">
@@ -94,4 +91,21 @@ if res:
 
     color = "#28a745" if "PIRKTI" in res['cmd'] else "#dc3545" if "PARDUOTI" in res['cmd'] else "#343a40"
     st.markdown(f"""
-    <div style="background-
+    <div style="background-color:{color}; padding:20px; border-radius:15px; color:white; text-align:center; border: 4px solid white;">
+        <h1 style="margin:0;">{res['cmd']} | {res['p']:.2f}€</h1>
+        <p style="font-size:18px;">🎯 Target: {res['tp']:.2f}€ | 🛡️ Stop Loss: {res['sl']:.2f}€</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    fig.patch.set_facecolor('black')
+    ax.set_facecolor('#0a0a0a')
+    hist_df = df.tail(8)
+    ax.plot(hist_df['time'], hist_df['close'], color='white', linewidth=2)
+    
+    last_time = df['time'].iloc[-1]
+    fut_times = [last_time + timedelta(minutes=15*i) for i in range(1, 25)]
+    fut_prices = [res['p'] + (res['score'] * i * 0.4) for i in range(1, 25)]
+    ax.plot(fut_times, fut_prices, color='#00ffcc', linestyle='--', linewidth=3)
+    
+    ax.axhline(res['tp'], color='#2ECC
