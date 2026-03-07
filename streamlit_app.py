@@ -6,12 +6,18 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Konfigūracija
-st.set_page_config(page_title="REVOLUT X SCALPER V132", layout="wide")
-st_autorefresh(interval=60000, key="v132_refresh")
+st.set_page_config(page_title="V133 ZERO LOSS SCALPER", layout="wide")
+st_autorefresh(interval=60000, key="v133_refresh")
 
 if 'trades_log' not in st.session_state: st.session_state.trades_log = []
 if 'wallet' not in st.session_state: st.session_state.wallet = 1700.0
 if 'total_pnl' not in st.session_state: st.session_state.total_pnl = 0.0
+
+# Funkcija išvalyti istoriją (kad nebūtų KeyError)
+def reset_all():
+    st.session_state.trades_log = []
+    st.session_state.total_pnl = 0.0
+    st.rerun()
 
 # 2. Duomenų gavimas
 def get_data():
@@ -28,68 +34,55 @@ def get_data():
 
 df = get_data()
 
-# 3. Skalpingas ir Prognozė
+# 3. Analizė: Tik Augimo Paieška
 if not df.empty:
     cur_p = df.iloc[-1]['close']
-    # Analizuojame 4 valandų trendą (16 žvakių)
+    # Tikriname tendenciją (ar rinka ruošiasi kilti)
     trend_4h = (df['close'].iloc[-1] - df['close'].iloc[-16]) / 16
     
-    # Generuojame 20 valandų (80 žvakių) ateities taškus
+    # 20 valandų prognozė (80 žvakių)
     future_times = [df.iloc[-1]['time'] + timedelta(minutes=15 * i) for i in range(1, 81)]
     future_prices = [cur_p + (trend_4h * i) for i in range(1, 81)]
     
-    # Randame geriausią pirkimo ir pardavimo kainą per 20h
-    min_future = min(future_prices)
     max_future = max(future_prices)
-    
-    st.title(f"🚀 Revolut X Scalper: {round(st.session_state.wallet, 2)}€")
-    st.write(f"Dabartinė ETH kaina: **{round(cur_p, 2)}€**")
+    potential_rise = max_future - cur_p
+    est_profit = (st.session_state.wallet / cur_p) * potential_rise
 
+    # VAIZDAVIMAS
+    st.title(f"💰 Revolut X Balansas: {round(st.session_state.wallet, 2)}€")
+    
     # GRAFIKAS: 4h praeitis | 20h ateitis
     fig, ax = plt.subplots(figsize=(12, 4))
     ax.plot(df['time'].tail(16), df['close'].tail(16), label="Istorija (4h)", marker='o', color='blue')
     ax.plot(future_times, future_prices, '--', color='orange', label="Prognozė (20h)")
-    ax.axhline(y=cur_p, color='gray', linestyle=':', label="Dabartinė kaina")
-    ax.fill_between(future_times, cur_p, future_prices, where=(pd.Series(future_prices) > cur_p), color='green', alpha=0.1)
-    ax.fill_between(future_times, cur_p, future_prices, where=(pd.Series(future_prices) < cur_p), color='red', alpha=0.1)
+    if trend_4h > 0:
+        ax.fill_between(future_times, cur_p, future_prices, color='green', alpha=0.1)
+    ax.axhline(y=cur_p, color='gray', linestyle=':', label="Dabar")
     ax.legend()
     st.pyplot(fig)
 
-    # 4. LOGIKA: 10€ pelno paieška artimiausiu metu
-    potential_rise = max_future - cur_p
-    potential_drop = cur_p - min_future
-    
-    # Paskaičiuojame kiekviena kryptimi galimą pelną
-    profit_buy = (st.session_state.wallet / cur_p) * potential_rise
-    profit_sell = (st.session_state.wallet / cur_p) * potential_drop
-
-    col1, col2 = st.columns(2)
-    
-    # Jei trendas kyla - siūlome pirkti dabar
-    if trend_4h > 0 and profit_buy >= 10.0:
-        col1.success(f"📈 PROGA PIRKTI! Galimas pelnas: {round(profit_buy, 2)}€")
-        action, target, est_p = "🟢 PIRKTI", max_future, profit_buy
-    # Jei trendas krenta - siūlome parduoti dabar ir atpirkti pigiau
-    elif trend_4h < 0 and profit_sell >= 10.0:
-        col2.warning(f"📉 PROGA PARDUOTI! Galimas pelnas: {round(profit_sell, 2)}€")
-        action, target, est_p = "🔴 PARDUOTI", min_future, profit_sell
-    else:
-        action = None
-        st.info("Laukiama progos su bent 10€ pelno potencialu...")
-
-    # Registruojame sandorį
-    if action:
+    # 4. SAUGI LOGIKA: Tik jei prognozuojamas AUGIMAS ir pelnas >= 10€
+    if trend_4h > 0.02 and est_profit >= 10.0:
+        status = "🟢 PIRKTI DABAR (Kils)"
+        target = max_future
+        
         now_t = datetime.now().strftime("%H:%M")
         if not st.session_state.trades_log or st.session_state.trades_log[0]['Laikas'] != now_t:
             st.session_state.trades_log.insert(0, {
                 "Laikas": now_t,
-                "Revolut X Veiksmas": "PERK Į ETH" if action == "🟢 PIRKTI" else "PARDUOK Į EUR",
+                "Revolut X Veiksmas": "PERK ETH",
                 "Kaina dabar": round(cur_p, 2),
-                "Tikslas (Profit)": round(target, 2),
-                "Prognoz. Pelnas": f"{round(est_p, 2)}€",
-                "Būsena": "⏳ VYKDYTI REVOLUTE"
+                "Parduoti už (Profit)": round(target, 2),
+                "Prognoz. Pelnas": f"+{round(est_profit, 2)}€",
+                "Būsena": "⏳ LAUKIAMA TIKSLO"
             })
+    else:
+        st.info("📉 Rinka krenta arba svyravimas per mažas. Laukiama saugios progos uždirbti 10€.")
 
-    st.subheader("📜 Artimiausių sandorių planas")
+    if st.button("🗑️ NULINTI ISTORIJĄ"): reset_all()
+    
+    st.subheader("📜 Saugūs Sandoriai (Be nuostolių)")
     if st.session_state.trades_log:
-        st.table(pd.DataFrame(st.session_state.trades_log).head(10))
+        # Išvalome senus stulpelius iš atminties, kad nebūtų KeyError
+        display_df = pd.DataFrame(st.session_state.trades_log)
+        st.table(display_df.head(10))
