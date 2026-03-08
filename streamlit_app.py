@@ -6,9 +6,9 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Konfigūracija ir Stabilumas
-st.set_page_config(page_title="V160 GROWTH ARCHITECT", layout="wide")
-st_autorefresh(interval=60000, key="v160_refresh")
+# 1. Konfigūracija
+st.set_page_config(page_title="V161 THE FINAL SENTINEL", layout="wide")
+st_autorefresh(interval=60000, key="v161_refresh")
 
 if 'wallet' not in st.session_state: st.session_state.wallet = 1700.0
 if 'active_trades' not in st.session_state: st.session_state.active_trades = []
@@ -38,7 +38,7 @@ if not df.empty:
     ma100 = df.iloc[-1]['MA100']
     std_val = df.iloc[-1]['STD']
     
-    # Prognozė
+    # 20H Prognozė
     y_vals = df['close'].tail(16).values 
     slope, intercept = np.polyfit(np.arange(len(y_vals)), y_vals, 1)
     target_20h = slope * 96 + intercept
@@ -49,7 +49,7 @@ if not df.empty:
     err_df = pd.DataFrame(st.session_state.prediction_history)
     reliability = max(0, (100 - ((err_df['fact'] - err_df['pred']).abs().mean() / cur_p * 2500)))
 
-    # --- AUTOMATINIS VYKDYMAS IR KAPITALO FIKSAVIMAS ---
+    # --- AUTOMATINIS VYKDYMAS ---
     for trade in st.session_state.active_trades:
         if trade['status'] == "LAUKIA" and cur_p <= trade['buy_p']:
             trade['status'] = "VYKDOMAS"
@@ -61,16 +61,15 @@ if not df.empty:
             trade['finish_time'] = datetime.now()
             trade['profit_eur'] = profit
             st.session_state.history.append(trade)
-            # Fiksuojame naują balansą grafikui
             st.session_state.equity_curve.append({"time": datetime.now(), "balance": st.session_state.wallet})
             st.balloons()
 
     # --- PAGRINDINIS SKYDELIS ---
-    st.title(f"🛡️ Growth Architect V160: {round(st.session_state.wallet, 2)}€")
+    st.title(f"🛡️ Final Sentinel V161: {round(st.session_state.wallet, 2)}€")
     
     today = datetime.now().date()
     today_profit = sum([t['profit_eur'] for t in st.session_state.history if t['finish_time'].date() == today])
-    st.info(f"📅 **Šios dienos rezultatas:** Uždirbta: **+{round(today_profit, 2)}€**")
+    st.info(f"📅 **Dienos rezultatas:** Uždirbta: **+{round(today_profit, 2)}€**")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("ETH KAINA", f"{round(cur_p, 2)}€")
@@ -78,17 +77,27 @@ if not df.empty:
     c3.metric("PATIKIMUMAS", f"{round(reliability, 1)}%")
     c4.metric("20H TIKSLAS", f"{round(target_20h, 2)}€")
 
-    # --- STRATEGINIS PLANAVIMAS (PATAISYTA) ---
+    # --- STRATEGINIS PLANAVIMAS (SU DVIGUBA TIKIMYBE) ---
     st.divider()
     col_a, col_b, col_c = st.columns(3)
     with col_a:
-        input_buy = st.number_input("Pirkimo kaina (€)", value=cur_p - 0.2, step=0.01, key="v160_buy")
-        input_sum = st.number_input("Investuojama suma (€)", value=100.0, key="v160_sum")
+        input_buy = st.number_input("Pirkimo kaina (€)", value=cur_p - 0.1, step=0.01, key="v161_buy")
+        input_sum = st.number_input("Suma (€)", value=100.0, key="v161_sum")
     with col_b:
-        prob = max(0, min(100, 100 - (abs(cur_p - input_buy) / std_val * 25)))
-        st.write(f"📊 Tikimybė nupirkti: **{round(prob, 1)}%**")
-        input_sell = st.number_input("Pardavimo kaina (€)", value=round(max(input_buy * 1.01, target_20h), 2), step=0.01, key="v160_sell")
+        # Pirkimo tikimybė
+        prob_buy = max(0, min(100, 100 - (abs(cur_p - input_buy) / std_val * 25)))
+        st.write(f"📥 Tikimybė nupirkti: **{round(prob_buy, 1)}%**")
+        
+        input_sell = st.number_input("Pardavimo kaina (€)", value=round(max(input_buy * 1.01, target_20h), 2), step=0.01, key="v161_sell")
+        
+        # NAUJA: Pardavimo tikimybė
+        # Skaičiuojama pagal atstumą iki 20h tikslo ir volatiliškumą
+        dist_to_sell = input_sell - cur_p
+        prob_sell = max(0, min(100, 100 - (abs(input_sell - target_20h) / std_val * 15))) if dist_to_sell > 0 else 100.0
+        st.write(f"📤 Tikimybė parduoti: **{round(prob_sell, 1)}%**")
+        
     with col_c:
+        st.write(" ")
         st.write(" ")
         if st.button("🚀 UŽSTATYTI SANDORĮ", use_container_width=True):
             if st.session_state.wallet >= input_sum:
@@ -99,7 +108,7 @@ if not df.empty:
                 st.session_state.wallet -= input_sum
                 st.rerun()
 
-    # --- VALDYMAS IR ATŠAUKIMAS ---
+    # --- VALDYMAS ---
     active_view = [t for t in st.session_state.active_trades if t['status'] != "PELNAS"]
     if active_view:
         st.subheader("📑 Vykdomi sandoriai")
@@ -115,24 +124,13 @@ if not df.empty:
                     st.session_state.active_trades.pop(i)
                     st.rerun()
 
-    # --- TRIJŲ LYGIŲ MONITORINGAS ---
+    # --- MONITORINGAS ---
     st.divider()
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10), gridspec_kw={'height_ratios': [3, 1, 1.5]})
-    
-    # 1. Rinkos grafikas
-    ax1.plot(df['time'].tail(60), df['close'].tail(60), color='#1f77b4', label="ETH Kaina")
+    ax1.plot(df['time'].tail(60), df['close'].tail(60), color='#1f77b4', label="Kaina")
     ax1.axhline(y=ma100, color='red', alpha=0.2, label="Trendas")
-    ax1.set_title("Rinkos Pulsas")
-    
-    # 2. Paklaidos grafikas
-    ax2.plot(err_df['time'], (err_df['fact'] - err_df['pred']).abs(), color='red', label="Klaida")
-    ax2.set_title("Analitikos Tikslumas")
-    
-    # 3. NAUJAS: KAPITALO AUGIMO GRAFIKAS
+    ax2.plot(err_df['time'], (err_df['fact'] - err_df['pred']).abs(), color='red')
     eq_df = pd.DataFrame(st.session_state.equity_curve)
-    ax3.step(eq_df['time'], eq_df['balance'], where='post', color='green', linewidth=2, label="Balansas")
+    ax3.step(eq_df['time'], eq_df['balance'], where='post', color='green', linewidth=2)
     ax3.fill_between(eq_df['time'], eq_df['balance'], 1700, color='green', alpha=0.1)
-    ax3.set_title("Kapitalo Augimo Kreivė (Pelno Progresas)")
-    
-    plt.tight_layout()
     st.pyplot(fig)
