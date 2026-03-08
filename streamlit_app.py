@@ -6,9 +6,9 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Konfigūracija
-st.set_page_config(page_title="TITAN ABSOLUTE V178", layout="wide")
-st_autorefresh(interval=60000, key="v178_refresh") # Atnaujinimas kas 1 min (rimtesnei analizei)
+# 1. Griežta Konfigūracija
+st.set_page_config(page_title="TITAN LIQUIDITY V179", layout="wide")
+st_autorefresh(interval=30000, key="v179_refresh")
 
 if 'wallet' not in st.session_state: st.session_state.wallet = 1711.45
 if 'active_trades' not in st.session_state: st.session_state.active_trades = []
@@ -20,7 +20,7 @@ def get_data():
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as r:
             res = json.loads(r.read().decode())
-            d = res['result']['XETHZEUR'][-120:]
+            d = res['result']['XETHZEUR'][-100:]
             df = pd.DataFrame(d, columns=['t','open','high','low','close','vwap','vol','count']).astype(float)
             df['time'] = pd.to_datetime(df['t'], unit='s') + timedelta(hours=2)
             return df
@@ -30,65 +30,64 @@ df = get_data()
 
 if not df.empty:
     cur_p = df.iloc[-1]['close']
+    # Nustatome TIKRĄ likvidumo dugną (žemiausia žvakės uodega per 24 val.)
+    liquidity_bottom = df['low'].tail(96).min() 
+    # Nustatome TIKRĄ pasipriešinimą (kur rinka "apsisuko" paskutinį kartą)
+    real_resistance = df['high'].tail(24).max()
     
-    # --- ABSOLIUTI ANALITIKA (Pagal tavo image_67455d.png) ---
-    # Nustatome pasipriešinimo zoną, kur kaina TIKRAI atšoks
-    resistance_zone = df['high'].tail(24).max() 
-    # Nustatome manipuliacijos dugną (kur pirkimas turi prasmę)
-    support_zone = df['low'].tail(24).min()
-    
-    # Tikrasis AMD tikslas (ne "prisitaikantis", o siekiantis viršūnės)
-    absolute_target = round(resistance_zone * 0.998, 2) 
+    # AMD Strategija: Perkam tik ten, kur kiti praranda viltį (prie liquidity_bottom)
+    hunt_buy = round(liquidity_bottom + (cur_p * 0.001), 2)
+    hunt_sell = round(cur_p + (real_resistance - cur_p) * 0.6, 2) # Realus, pasiekiamas tikslas
 
-    st.markdown(f"<h1 style='text-align: center; color: #ff4b4b;'>🩸 TITAN ABSOLUTE V178</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center; color: #00f2ff;'>🎯 TITAN LIQUIDITY HUNTER V179</h1>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("RINKOS KAINA", f"{cur_p}€")
-    col2.metric("DUGNO ZONA (SUPPORT)", f"{support_zone}€")
-    col3.metric("TIKRAS TIKSLAS (TARGET)", f"{absolute_target}€")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("ETH DABAR", f"{cur_p}€")
+    m2.metric("MEDŽIOKLĖS ZONA (BUY)", f"{hunt_buy}€", "LIKVIDUMAS", delta_color="inverse")
+    m3.metric("IŠĖJIMO TIKSLAS (SELL)", f"{hunt_sell}€")
 
-    # --- GRAFIKAS SU ZONOMIS ---
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(df['time'], df['close'], color='white', label='Kaina')
+    # --- GRAFIKAS: LIKVIDUMO ŽEMĖLAPIS ---
+        fig, ax = plt.subplots(figsize=(12, 5))
+    ax.plot(df['time'], df['close'], color='white', linewidth=1, label='Market')
     
-    # Brėžiame AMD zonas kaip tavo pavyzdžiuose
-    ax.axhspan(support_zone, support_zone + 5, color='green', alpha=0.2, label='Manipulation Zone')
-    ax.axhspan(absolute_target - 5, absolute_target, color='red', alpha=0.2, label='Distribution Zone')
+    # Vizualizuojame pirkimo ir pardavimo zonas pagal tavo pavyzdžius
+    ax.axhspan(liquidity_bottom, hunt_buy, color='cyan', alpha=0.3, label='Liquidity Sweep Zone')
+    ax.axhspan(hunt_sell, real_resistance, color='magenta', alpha=0.2, label='Take Profit Zone')
     
     ax.set_facecolor('#0E1117')
     fig.patch.set_facecolor('#0E1117')
     ax.tick_params(colors='white')
-    plt.legend()
+    plt.legend(loc='upper left')
     st.pyplot(fig)
 
-    # --- VEIKSMŲ CENTRAS ---
+    # --- REIDO VALDYMAS ---
     st.divider()
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("🤖 Algoritmo Sprendimas")
-        if cur_p > support_zone + 10:
-            st.warning("⚠️ Kaina per aukštai. Laukiame manipuliacijos (kritimo į žalią zoną).")
-        else:
-            st.success("✅ Pirkimo zona pasiekta. Galima vykdyti reidą.")
-            
-        in_buy = st.number_input("Pirkimo riba", value=round(support_zone + 2, 2))
-        in_sell = st.number_input("Pardavimo riba", value=absolute_target)
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.subheader("🛠️ Operacijos nustatymai")
+        final_buy = st.number_input("Pirkimo kaina (Medžioklė)", value=hunt_buy)
+        final_sell = st.number_input("Pardavimo kaina (Profit)", value=hunt_sell)
     
-    with c2:
+    with col_r:
         in_sum = st.number_input("Investicija (€)", value=1000.0)
-        if st.button("🚀 VYKDYTI ATSAKOMYBĖS REIDĄ", use_container_width=True):
+        potential = round((in_sum/final_buy) * (final_sell - final_buy), 2)
+        if st.button("🔱 PALEISTI LIQUIDITY REIDĄ", use_container_width=True):
             if st.session_state.wallet >= in_sum:
-                st.session_state.active_trades.append({"buy_p": in_buy, "sell_p": in_sell, "amount": in_sum, "status": "LAUKIA"})
+                st.session_state.active_trades.append({
+                    "buy_p": final_buy, "sell_p": final_sell, "amount": in_sum, "status": "MEDŽIOJA"
+                })
                 st.session_state.wallet -= in_sum
-                st.info("Sandoris užfiksuotas. Robotas nebekeis tikslų.")
+                st.success("Reidas aktyvuotas. Laukiama kainos įkritimo į zoną.")
                 st.rerun()
+        st.write(f"Planuojamas uždarbis: **+{potential}€**")
 
-    # LOGIKA BE "PRISITAIKYMO"
+    # --- LOGIKA: JOKIŲ NUOLAIDŲ ---
     for trade in st.session_state.active_trades:
-        if trade['status'] == "LAUKIA" and cur_p <= trade['buy_p']:
-            trade['status'] = "🚀 VYKDOMAS"
-        if trade['status'] == "🚀 VYKDOMAS" and cur_p >= trade['sell_p']:
+        if trade['status'] == "MEDŽIOJA" and cur_p <= trade['buy_p']:
+            trade['status'] = "🔥 POZICIJOJE"
+        if trade['status'] == "🔥 POZICIJOJE" and cur_p >= trade['sell_p']:
             profit = (trade['amount'] / trade['buy_p']) * (cur_p - trade['buy_p'])
             st.session_state.wallet += (trade['amount'] + profit)
-            trade['status'] = "✅ PELNAS"
+            trade['status'] = "✅ PELNAS SUGAUTAS"
+            st.session_state.history.append(trade)
             st.balloons()
