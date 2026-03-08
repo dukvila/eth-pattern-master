@@ -6,20 +6,17 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Konfigūracija ir Stabilumas
-st.set_page_config(page_title="V152 SUPREME SENTINEL", layout="wide")
-st_autorefresh(interval=60000, key="v152_final")
+# 1. Sistemos Stabilumas ir Konfigūracija
+st.set_page_config(page_title="V156 TITAN SENTINEL", layout="wide")
+st_autorefresh(interval=60000, key="v156_refresh")
 
+# Duomenų bazė sesijoje (išlieka kol veikia debesys)
 if 'wallet' not in st.session_state: st.session_state.wallet = 1700.0
-if 'active_trade' not in st.session_state: st.session_state.active_trade = None
-if 'trades_log' not in st.session_state: st.session_state.trades_log = []
-if 'prediction_history' not in st.session_state: st.session_state.prediction_history = []
+if 'active_trades' not in st.session_state: st.session_state.active_trades = []
+if 'history' not in st.session_state: st.session_state.history = []
 
-def play_alert():
-    st.components.v1.html('<audio autoplay><source src="https://www.soundjay.com/buttons/sounds/button-3.mp3" type="audio/mpeg"></audio>', height=0)
-
-# 2. Duomenų gavimas be klaidų
-def get_data():
+# 2. Saugus Duomenų Gavimas (Be klaidų)
+def get_crypto_data():
     try:
         url = "https://api.kraken.com/0/public/OHLC?pair=ETHEUR&interval=15"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -28,92 +25,92 @@ def get_data():
             d = res['result']['XETHZEUR'][-200:]
             df = pd.DataFrame(d, columns=['t','open','high','low','close','vwap','vol','count']).astype(float)
             df['time'] = pd.to_datetime(df['t'], unit='s') + timedelta(hours=2)
-            df['MA7'] = df['close'].rolling(window=7).mean()
-            df['MA25'] = df['close'].rolling(window=25).mean()
-            df['MA100'] = df['close'].rolling(window=100).mean() # Dienos trendo ašis
+            df['MA100'] = df['close'].rolling(window=100).mean()
+            df['STD'] = df['close'].rolling(window=20).std()
             return df
     except Exception as e:
-        st.error(f"Duomenų klaida: {e}")
+        st.error(f"Ryšio klaida: {e}")
         return pd.DataFrame()
 
-df = get_data()
+df = get_crypto_data()
 
 if not df.empty:
     cur_p = df.iloc[-1]['close']
     ma100 = df.iloc[-1]['MA100']
+    std_val = df.iloc[-1]['STD']
     
-    # --- PROGNOZĖS SKAIČIAVIMAS ---
-    y_4h = df['close'].tail(16).values 
-    x_4h = np.arange(len(y_4h))
-    slope, intercept = np.polyfit(x_4h, y_4h, 1)
-    prediction = slope * np.arange(len(y_4h), len(y_4h) + 80) + intercept
-    
-    # --- PATIKIMUMO FILTRAS ---
-    current_time = df.iloc[-1]['time']
-    st.session_state.prediction_history.append({"time": current_time, "pred": prediction[0], "fact": cur_p})
-    if len(st.session_state.prediction_history) > 60: st.session_state.prediction_history.pop(0)
-    
-    error_df = pd.DataFrame(st.session_state.prediction_history)
-    avg_err = (error_df['fact'] - error_df['pred']).abs().mean()
-    
-    # Tikrasis patikimumas: Baudžiame, jei 4h kryptis priešinga 24h trendui
-    trend_aligned = (slope > 0 and cur_p > ma100)
-    reliability = max(0, (100 - (avg_err / cur_p * 2500)))
-    if not trend_aligned: reliability *= 0.5 # Mažiname pasitikėjimą perpus, jei trendas krenta
+    # Tikslioji 20H Prognozė
+    y_vals = df['close'].tail(16).values 
+    slope, intercept = np.polyfit(np.arange(len(y_vals)), y_vals, 1)
+    target_20h = slope * 96 + intercept
+    trend_power = slope # Trendo stiprumo indikatorius
 
-    # --- VAIZDUOJAMASIS SKYDELIS ---
-    st.title(f"🛡️ Supreme Sentinel V152: {round(st.session_state.wallet, 2)}€")
+    st.title(f"🛡️ Titan Sentinel V156: {round(st.session_state.wallet, 2)}€")
     
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("ETH KAINA", f"{round(cur_p, 2)}€")
-    trend_txt = "KYLANTIS 📈" if cur_p > ma100 else "KRINTANTIS 📉"
-    c2.metric("DIENOS TRENDAS (24H)", trend_txt, delta=round(cur_p - ma100, 2))
-    c3.metric("TIKRAS PATIKIMUMAS", f"{round(reliability, 1)}%")
-    c4.metric("20H TIKSLAS", f"{round(prediction[-1], 2)}€")
+    # --- AUTOMATINIS VYKDYMO VARIKLIS ---
+    for trade in st.session_state.active_trades:
+        # A. Automatinis Pirkimas
+        if trade['status'] == "LAUKIA" and cur_p <= trade['buy_p']:
+            trade['status'] = "VYKDOMAS"
+            st.toast(f"✅ Nupirkta už {trade['buy_p']}€")
+            
+        # B. Dinaminis Pelno Kėlimas (Tik jei trendas stiprus)
+        if trade['status'] == "VYKDOMAS":
+            if target_20h > trade['sell_p'] and trend_power > 0.6:
+                old_target = trade['sell_p']
+                trade['sell_p'] = round(target_20h, 2)
+                st.toast(f"📈 Pelno tikslas pakeltas: {old_target} -> {trade['sell_p']}€")
 
-    # 3. Grafikas be "SyntaxError"
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [3, 1]})
-    
-    # Pagrindinis grafikas
-    ax1.plot(df['time'].tail(100), df['close'].tail(100), label="24h Istorija", color='lightgray', alpha=0.5)
-    ax1.plot(df['time'].tail(16), df['close'].tail(16), label="4h Aktyvi zona", color='blue', linewidth=2)
-    
-    future_times = [current_time + timedelta(minutes=15*i) for i in range(1, 81)]
-    ax1.plot(future_times, prediction, label="20h Prognozė", color='orange', linestyle='--')
-    ax1.axhline(y=ma100, color='red', alpha=0.3, label="Dienos ašis (MA100)")
-    ax1.legend()
-    
-    # Klaidos grafikas (Mokymosi kreivė)
-    ax2.plot(error_df['time'], (error_df['fact'] - error_df['pred']).abs(), color='red')
-    ax2.set_title("Sistemos Paklaida (Kuo žemiau, tuo tiksliau)")
-    
-    st.pyplot(fig)
+        # C. Automatinis Pardavimas (Tik į PLIUSĄ)
+        if trade['status'] == "VYKDOMAS" and cur_p >= trade['sell_p']:
+            profit = (trade['amount'] / trade['buy_p']) * (cur_p - trade['buy_p'])
+            st.session_state.wallet += (trade['amount'] + profit)
+            trade['status'] = "PELNAS"
+            st.session_state.history.append(trade)
+            st.balloons()
+            st.success(f"💰 Sandoris baigtas! Pelnas: +{round(profit, 2)}€")
 
-    # 4. Griežta Prekybos Logika
-    if st.session_state.active_trade is None:
-        if cur_p > ma100 and reliability > 80:
-            st.success("💎 SAUGUS SIGNALAS: Trendas ir Prognozė sutampa.")
-            if st.button("INVESTUOTI MAX"):
-                st.session_state.active_trade = {"buy_p": cur_p, "invested": st.session_state.wallet}
+    # --- KOMANDINIS SKYDELIS ---
+    st.sidebar.header("📊 Biudžeto Valdymas")
+    trade_sum = st.sidebar.number_input("Suma vienam sandoriui (€)", value=100.0)
+    
+    st.subheader("🎯 Strateginis Planavimas")
+    c1, c2, c3 = st.columns(3)
+    
+    with c1:
+        req_buy = st.number_input("Pirkimo kaina (€)", value=cur_p - 0.5)
+        dist = abs(cur_p - req_buy)
+        prob = max(0, min(100, 100 - (dist / std_val * 25)))
+        st.write(f"📊 Tikimybė nupirkti: **{round(prob, 1)}%**")
+
+    with c2:
+        buy_pct = round(((req_buy - cur_p) / cur_p) * 100, 2)
+        st.write(f"Rekomendacija: **{buy_pct}%** nuo dabartinės")
+        # Rekomenduojamas pardavimas (min +1% arba prognozė)
+        rec_sell = max(req_buy * 1.01, target_20h)
+        req_sell = st.number_input("Pardavimo kaina (€)", value=round(rec_sell, 2))
+
+    with c3:
+        st.write(f"Trendo jėga: **{'STIPRI 🚀' if trend_power > 0.5 else 'STABILI ⏳'}**")
+        if st.button("UŽSTATYTI AUTO-SANDORĮ"):
+            if st.session_state.wallet >= trade_sum:
+                st.session_state.active_trades.append({
+                    "buy_p": req_buy, "sell_p": req_sell, 
+                    "amount": trade_sum, "status": "LAUKIA",
+                    "time": datetime.now().strftime("%H:%M")
+                })
+                st.session_state.wallet -= trade_sum
                 st.rerun()
-        else:
-            st.warning("⚠️ BLOKUOJAMA: Dienos trendas krenta arba patikimumas per mažas.")
+            else:
+                st.error("Nepakanka pinigų!")
 
-    if st.session_state.active_trade:
-        t = st.session_state.active_trade
-        profit = (t['invested'] / t['buy_p']) * (cur_p - t['buy_p'])
-        target = t['buy_p'] + (10.0 * t['buy_p'] / st.session_state.wallet)
-        
-        st.info(f"💼 Sandoris: {t['invested']}€. Dabartinis rezultatas: {round(profit, 2)}€")
-        
-        # Tikriname "No Loss" taisyklę
-        if cur_p >= target:
-            if st.button(f"FIKSUOTI PELNĄ ({round(profit, 2)}€)"):
-                st.session_state.wallet += profit
-                st.session_state.active_trade = None
-                st.balloons()
-                st.rerun()
-        else:
-            st.error(f"Laukiamas atšokimas iki {round(target, 2)}€ (Neprekiaujame į minusą!)")
+    # --- MONITORINGAS ---
+    st.divider()
+    active_list = [t for t in st.session_state.active_trades if t['status'] != "PELNAS"]
+    if active_list:
+        st.subheader("📑 Aktyvios Operacijos")
+        st.table(pd.DataFrame(active_list))
 
-    st.table(pd.DataFrame(st.session_state.trades_log).head(5))
+    # Grafinis Radaras
+    fig, ax = plt.subplots(figsize=(12, 3))
+    ax.plot(df['time'].tail(50), df['close'].tail(50), color='#1f77b4', label="ETH Kaina")
