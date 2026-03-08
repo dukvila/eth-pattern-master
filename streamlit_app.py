@@ -8,21 +8,23 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Konfigūracija
-st.set_page_config(page_title="V167 TITAN OVERLORD", layout="wide")
-st_autorefresh(interval=60000, key="v167_refresh")
+st.set_page_config(page_title="V168 TITAN LOCKDOWN", layout="wide")
+st_autorefresh(interval=60000, key="v168_refresh")
 
-if 'wallet' not in st.session_state: st.session_state.wallet = 1700.0
+# Inicijuojame kintamuosius, jei jų nėra
+if 'wallet' not in st.session_state: st.session_state.wallet = 1711.45
 if 'active_trades' not in st.session_state: st.session_state.active_trades = []
 if 'history' not in st.session_state: st.session_state.history = []
-if 'equity_curve' not in st.session_state: st.session_state.equity_curve = [{"time": datetime.now(), "balance": 1700.0}]
+if 'equity_curve' not in st.session_state: st.session_state.equity_curve = [{"time": datetime.now(), "balance": 1711.45}]
+# NAUJA: Laukelių atmintis, kad kaina "neatšoktų"
+if 'manual_buy' not in st.session_state: st.session_state.manual_buy = 0.0
+if 'manual_sell' not in st.session_state: st.session_state.manual_sell = 0.0
 
-# Matematika be klaidų
 def get_probability(current, target, std):
     if std < 0.01: return 50.0
     z = (current - target) / std
     return 0.5 * (1 + math.erf(z / math.sqrt(2))) * 100
 
-# 2. Duomenų Gavimas
 def get_data():
     try:
         url = "https://api.kraken.com/0/public/OHLC?pair=ETHEUR&interval=15"
@@ -41,8 +43,8 @@ df = get_data()
 
 if not df.empty:
     cur_p = df.iloc[-1]['close']
-    ma100 = df.iloc[-1]['MA100']
     std_val = df.iloc[-1]['STD']
+    ma100 = df.iloc[-1]['MA100']
     
     # 20h Prognozė
     y_vals = df['close'].tail(16).values 
@@ -51,32 +53,24 @@ if not df.empty:
 
     # --- AGRESYVUMO VALDYMAS ---
     st.sidebar.title("🎮 Valdymo Centras")
-    mode = st.sidebar.select_slider(
-        "Pasirink Agresyvumą",
-        options=["SAUGUS", "SUBALANSUOTAS", "AGRESYVUS"],
-        value="SUBALANSUOTAS"
-    )
+    mode = st.sidebar.select_slider("Pasirink Agresyvumą", options=["SAUGUS", "SUBALANSUOTAS", "AGRESYVUS"], value="SUBALANSUOTAS")
     
-    # Algoritmo korekcija pagal rėžimą
-    if mode == "SAUGUS":
-        buy_offset, profit_target = 0.8, 1.5  # Perka pigiau, parduoda greičiau
-    elif mode == "AGRESYVUS":
-        buy_offset, profit_target = 0.2, 5.0  # Perka brangiau, laukia didelio pelno
-    else:
-        buy_offset, profit_target = 0.5, 2.5  # Aukso vidurys
+    if mode == "SAUGUS": buy_off, prof_t = 0.8, 1.5
+    elif mode == "AGRESYVUS": buy_off, prof_t = 0.2, 5.0
+    else: buy_off, prof_t = 0.5, 2.5
     
-    smart_buy = round(cur_p - (std_val * buy_offset), 2)
-    smart_sell = round(max(smart_buy + profit_target, target_20h), 2)
+    # Automatinis siūlymas (tik jei vartotojas dar nieko neįvedė)
+    smart_buy = round(cur_p - (std_val * buy_off), 2)
+    smart_sell = round(max(smart_buy + prof_t, target_20h), 2)
 
-    # --- AUTOMATINIS VYKDYMAS ---
+    # --- VYKDYMAS ---
     for trade in st.session_state.active_trades:
         if trade['status'] == "LAUKIA":
-            if cur_p < trade['buy_p'] * 0.98: # Stop-Loss
+            if cur_p < trade['buy_p'] * 0.98:
                 st.session_state.wallet += trade['amount']
                 trade['status'] = "STOP-LOSS 🛡️"
             elif cur_p <= trade['buy_p']:
                 trade['status'] = "VYKDOMAS 🚀"
-        
         if trade['status'] == "VYKDOMAS 🚀" and cur_p >= trade['sell_p']:
             profit = (trade['amount'] / trade['buy_p']) * (cur_p - trade['buy_p'])
             st.session_state.wallet += (trade['amount'] + profit)
@@ -87,26 +81,20 @@ if not df.empty:
             st.session_state.equity_curve.append({"time": datetime.now(), "balance": st.session_state.wallet})
             st.balloons()
 
-    # --- PAGRINDINIS SKYDELIS ---
-    st.title(f"🚀 Titan Overlord V167: {round(st.session_state.wallet, 2)}€")
-    
+    # --- SKYDELIS ---
+    st.title(f"🚀 Titan Lockdown V168: {round(st.session_state.wallet, 2)}€")
     week_profit = sum([t['profit_eur'] for t in st.session_state.history if t['finish_time'] > (datetime.now() - timedelta(days=7))])
-    st.info(f"📍 Rėžimas: **{mode}** | Savaitės rezultatas: **+{round(week_profit, 2)}€**")
+    st.info(f"📍 Rėžimas: {mode} | Savaitės rezultatas: +{round(week_profit, 2)}€")
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("ETH KAINA", f"{round(cur_p, 2)}€")
-    c2.metric("TRENDAS", "KYLA 📈" if cur_p > ma100 else "KRINTA 📉")
-    c3.metric("TIKSLAS", f"{round(smart_sell, 2)}€")
-    c4.metric("20H PROGNOZĖ", f"{round(target_20h, 2)}€")
-
-    # --- AUTOPILOTO KONSOLE ---
+    # --- KONSOLE (SU FIKSAVIMU) ---
     st.divider()
     col_x, col_y = st.columns([2, 1])
     with col_x:
         st.subheader("🤖 Autopiloto Siūlomas Sandoris")
-        in_buy = st.number_input("Pirkimas", value=smart_buy)
-        in_sell = st.number_input("Pardavimas", value=smart_sell)
-        in_sum = st.number_input("Investicijos Suma (€)", value=1000.0)
+        # Naudojame 'key', kad Streamlit išsaugotų reikšmę atmintyje
+        in_buy = st.number_input("Pirkimas", value=smart_buy, format="%.2f", key="fixed_buy")
+        in_sell = st.number_input("Pardavimas", value=smart_sell, format="%.2f", key="fixed_sell")
+        in_sum = st.number_input("Investicijos Suma (€)", value=1000.0, key="fixed_sum")
     
     with col_y:
         p_buy = get_probability(cur_p, in_buy, std_val)
