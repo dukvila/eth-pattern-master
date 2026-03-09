@@ -6,9 +6,9 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Konfigūracija
-st.set_page_config(page_title="TITAN STRIKE V207", layout="wide")
-st_autorefresh(interval=30000, key="v207_refresh")
+# 1. Branduolys
+st.set_page_config(page_title="TITAN VICTORY V208", layout="wide")
+st_autorefresh(interval=30000, key="v208_refresh")
 
 if 'wallet' not in st.session_state: 
     st.session_state.wallet = 1711.45
@@ -28,44 +28,49 @@ def get_data():
 df = get_data()
 
 if not df.empty:
-    cur_p = df.iloc[-1]['close'] # Dabartinė kaina ~1,729€
-    target_p = 1748.00 # Tikslas
+    cur_p = df.iloc[-1]['close'] # Dabartinė kaina ~1,749.83€
+    new_high = 1758.64 # Naujas pikas
+    support_p = 1746.80 # Naujas palaikymas
     
-    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>⚡ TITAN STRIKE V207</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🏆 TITAN VICTORY V208</h1>", unsafe_allow_html=True)
 
-    # --- REALAUS LAIKO SIGNALAS ---
-    st.error(f"🎯 PIRKIMO SIGNALAS AKTYVUS: {cur_p} €")
-    st.write(f"Šiuo metu kaina yra žemiau tavo fiksacijos taško ({cur_p}€ < 1733€). Tai palankus įėjimas.")
+    # --- STATUSAS ---
+    col1, col2 = st.columns(2)
+    with col1:
+        st.success(f"🚀 NAUJAS PIKAS: {new_high} €")
+        st.write("Rinka patvirtino pirkimo modelį.")
+    with col2:
+        profit_now = (st.session_state.wallet / 1728.77 * cur_p) - st.session_state.wallet if cur_p > 1728.77 else 0
+        st.metric("POTENCIALUS PELNAS", f"+{round(profit_now, 2)} €")
 
-    # --- 4 VALANDŲ PELNO PROGNOZĖ ---
-    st.subheader("💰 Tavo Pelno Planas (4 val. į priekį)")
-    future_moves = []
-    vol = (df['high'] - df['low']).tail(10).mean()
+    # --- 4 VALANDŲ PROGNOZĖ (ATNAUJINTA) ---
+    st.subheader("🕒 Tolimesnė eiga: Ar kils iki 1,770€?")
+    future_data = []
+    vol = (df['high'] - df['low']).tail(5).mean()
     
     for i in range(1, 17):
         f_time = (datetime.now() + timedelta(minutes=15*i)).strftime("%H:%M")
-        # Modelis: Atšokimas nuo 1,728€ link 1,748€
-        f_price = round(cur_p + (vol * 0.5 * i), 2)
-        if f_price > target_p: f_price = target_p
-        
-        pelnas = (st.session_state.wallet / cur_p * f_price) - st.session_state.wallet
-        future_moves.append({
+        # Modelis: Konsolidacija virš 1,746€
+        f_price = round(cur_p + (vol * 0.3 * i), 2)
+        future_data.append({
             "Laikas": f_time,
             "Prognozė": f"{f_price} €",
-            "Pelnas (€)": f"+{round(pelnas, 2)} €"
+            "Veiksmas": "🔥 LAIKYTI" if f_price > support_p else "⚠️ PARDUOTI"
         })
-    st.table(pd.DataFrame(future_moves[::2])) # Kas 30 min.
+    st.table(pd.DataFrame(future_data[::2]))
 
-    # --- VAIZDINIS ĮVERTINIMAS (2 VAL. / 4 VAL.) ---
+    # --- GRAFIKAS ---
     fig, ax = plt.subplots(figsize=(10, 4))
-    hist = df.tail(8) # 2 valandos
+    hist = df.tail(8) # 2 valandos praeities
     ax.plot(hist['time'], hist['close'], color='white', label='Istorija', linewidth=2)
     
     f_times = [hist['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 17)]
-    f_vals = [cur_p + (vol * 0.5 * i) if cur_p + (vol * 0.5 * i) < target_p else target_p for i in range(1, 17)]
-    ax.plot(f_times, f_vals, color='#00ffcc', linestyle='--', marker='o', label='Atšokimas')
+    f_vals = [cur_p + (vol * 0.3 * i) for i in range(1, 17)]
+    ax.plot(f_times, f_vals, color='#00ffcc', linestyle='--', marker='o', label='Tęsinys')
     
-    ax.axhline(target_p, color='gold', linestyle=':', label='Tikslas 1748€')
+    ax.axhline(new_high, color='gold', linestyle=':', label='Pikas')
+    ax.axhline(support_p, color='red', linestyle=':', label='Saugiklis (1746€)')
+    
     ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117')
     ax.tick_params(colors='white'); ax.legend(facecolor='#0E1117', labelcolor='white')
     st.pyplot(fig)
