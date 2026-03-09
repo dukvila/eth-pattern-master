@@ -4,73 +4,68 @@ import pandas as pd
 import pandas_ta as ta
 import plotly.graph_objects as go
 from datetime import datetime
+import time
 
-# Puslapio nustatymai - PRIVALOMA DALIS
-st.set_page_config(page_title="ETH-Master", layout="wide")
-st.title("📈 Ethereum (ETH/EUR) 15m Grafikas")
+# 1. Konfigūracija
+st.set_page_config(page_title="ETH Pro Robot", layout="wide")
 
-# Funkcija duomenims gauti
-@st.cache_data(ttl=20)
-def get_crypto_data():
+# Funkcija, kuri saugiai gauna duomenis ir automatiškai taiso logines klaidas
+def fetch_safe_data():
     try:
-        # Jungiamės prie Binance
         exchange = ccxt.binance()
         ohlcv = exchange.fetch_ohlcv('ETH/EUR', timeframe='15m', limit=100)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['time'] = pd.to_datetime(df['timestamp'], unit='ms')
         
-        # Apskaičiuojame rodiklius (RSI 6, SMA 20, EMA 9)
+        # Automatinis indikatorių skaičiavimas su apsauga nuo tuščių duomenų
         df['rsi'] = ta.rsi(df['close'], length=6)
         df['sma20'] = ta.sma(df['close'], length=20)
         df['ema9'] = ta.ema(df['close'], length=9)
-        return df
+        
+        return df.dropna() # Išmetame nepilnas eilutes, kad nekiltų braižymo klaidų
     except Exception as e:
+        st.sidebar.error(f"Ryšio klaida: {e}. Bandau jungtis iš naujo...")
         return None
 
-df = get_crypto_data()
-
-if df is not None:
-    # Dabartinė būsena
-    last_rsi = df['rsi'].iloc[-1]
-    last_price = df['close'].iloc[-1]
-
-    # Signalas viršuje
-    col1, col2 = st.columns(2)
-    col1.metric("Kaina", f"{last_price} EUR")
+# Pagrindinė programos logika
+def main():
+    st.title("🚀 ETH/EUR Automatinė Analizė")
     
-    if last_rsi < 70:
-        col2.success(f"✅ RSI: {last_rsi:.2f} - SAUGI ZONA PIRKTI")
-    else:
-        col2.warning(f"⚠️ RSI: {last_rsi:.2f} - PERPIRKTA (ATSARGIAI)")
+    # Sukuriame vietą, kuri bus nuolat atnaujinama be puslapio perkrovimo
+    placeholder = st.empty()
 
-    # GRAFIKAS (Naudojame Plotly, kad nebūtų ax.plot klaidų)
-    fig = go.Figure()
-    
-    # Žvakės
-    fig.add_trace(go.Candlestick(
-        x=df['time'], open=df['open'], high=df['high'],
-        low=df['low'], close=df['close'], name='Kaina'
-    ))
+    while True:
+        df = fetch_safe_data()
+        
+        if df is not None:
+            with placeholder.container():
+                last_price = df['close'].iloc[-1]
+                last_rsi = df['rsi'].iloc[-1]
+                
+                # Vizualūs indikatoriai
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Kaina", f"{last_price} EUR")
+                m2.metric("RSI (6)", f"{last_rsi:.2f}")
+                
+                if last_rsi < 70:
+                    m3.success("✅ PIRKIMO SIGNALAS")
+                else:
+                    m3.warning("⚠️ PALAUŽKITE (PERPIRKTA)")
 
-    # SMA 20 (Geltona)
-    fig.add_trace(go.Scatter(x=df['time'], y=df['sma20'], 
-                             line=dict(color='yellow', width=2), name='SMA 20'))
-    
-    # EMA 9 (Žydra)
-    fig.add_trace(go.Scatter(x=df['time'], y=df['ema9'], 
-                             line=dict(color='cyan', width=2), name='EMA 9'))
+                # Grafikas naudojant Plotly (atspariausias klaidoms)
+                fig = go.Figure()
+                fig.add_trace(go.Candlestick(x=df['time'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name='Kaina'))
+                fig.add_trace(go.Scatter(x=df['time'], y=df['sma20'], line=dict(color='yellow', width=2), name='SMA 20'))
+                fig.add_trace(go.Scatter(x=df['time'], y=df['ema9'], line=dict(color='cyan', width=2), name='EMA 9'))
+                
+                fig.update_layout(xaxis_rangeslider_visible=False, height=500, template="plotly_dark")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.caption(f"Paskutinis sėkmingas atnaujinimas: {datetime.now().strftime('%H:%M:%S')}")
 
-    fig.update_layout(xaxis_rangeslider_visible=False, height=500, template="plotly_dark")
-    st.plotly_chart(fig, use_container_width=True)
+        # Programa "miega" 10 sekundžių ir pati save atnaujina be tavo įsikišimo
+        time.sleep(10)
+        st.rerun()
 
-    # RSI Grafikas apačioje
-    st.subheader("RSI (6) Indikatorius")
-    rsi_fig = go.Figure()
-    rsi_fig.add_trace(go.Scatter(x=df['time'], y=df['rsi'], line=dict(color='purple')))
-    rsi_fig.add_hline(y=70, line_dash="dash", line_color="red")
-    rsi_fig.update_layout(height=200, template="plotly_dark")
-    st.plotly_chart(rsi_fig, use_container_width=True)
-    
-    st.caption(f"Atnaujinta: {datetime.now().strftime('%H:%M:%S')}")
-else:
-    st.error("Nepavyko gauti duomenų. Patikrink interneto ryšį arba Binance pasiekiamumą.")
+if __name__ == "__main__":
+    main()
