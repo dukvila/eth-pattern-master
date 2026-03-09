@@ -1,5 +1,4 @@
 streamlit
-pandas
-matplotlib
-numpy
-streamlit-autorefresh
+ccxt
+pandas_ta
+plotly
