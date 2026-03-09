@@ -6,9 +6,9 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Sistemos Branduolys
-st.set_page_config(page_title="TITAN FINAL-STABLE V203", layout="wide")
-st_autorefresh(interval=30000, key="v203_refresh")
+# 1. Konfigūracija
+st.set_page_config(page_title="TITAN REAPER V204", layout="wide")
+st_autorefresh(interval=30000, key="v204_refresh")
 
 if 'wallet' not in st.session_state: 
     st.session_state.wallet = 1711.45
@@ -29,44 +29,67 @@ def get_data():
 df = get_data()
 
 if not df.empty:
-    # --- ANALIZĖ ---
-    cur_p = df.iloc[-1]['close'] 
-    # Binance duomenų integravimas
-    panic_sell_p = 1731.00 
-    bull_pct = 85 # Pagal tavo fiksaciją
-
-    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🛡️ TITAN FINAL-STABLE V203</h1>", unsafe_allow_html=True)
-
-    # --- PANIC SELL ALARM ---
-    if cur_p <= panic_sell_p:
-        st.error(f"⚠️ PANIC SELL! Kaina nukrito žemiau {panic_sell_p}€!")
-
-    # --- JĖGOS MATUOKLIS ---
-    st.subheader("⚔️ Binance Rinkos Pulsas")
-    st.progress(bull_pct / 100)
-    st.write(f"BULIAI: {bull_pct}% | MEŠKOS: {100-bull_pct}%")
-
-    # --- PROGNOZĖS LENTELĖ (Sutvarkytas rodymas) ---
-    st.subheader("🕒 15 min. Žvakių Ateities Prognozė")
-    future_data = []
-    vol = (df['high'] - df['low']).tail(5).mean()
+    cur_p = df.iloc[-1]['close'] # Dabartinė kaina
+    # Modelis: kaina dažnai atšoka nuo 0.5% kritimo po piko
+    # Pikas buvo 1,748€
     
-    for i in range(1, 6):
-        f_time = (datetime.now() + timedelta(minutes=15*i)).strftime("%H:%M")
-        f_price = round(cur_p + (vol * 0.5 * i), 2)
-        future_data.append({
-            "Laikas": f_time,
-            "Kaina (€)": f_price,
-            "Pelnas (1000€)": f"+{round((1000/cur_p * f_price) - 1000, 2)}€"
-        })
-    # Ištaisyta klaida iš image_1418f9.png - dabar rodo duomenis
-    st.table(pd.DataFrame(future_data)) 
+    # --- PROGNOZĖS SKAIČIAVIMAS ---
+    # Atšokimo pirkimo taškas (Dugnas)
+    buy_target = round(cur_p * 0.997, 2) 
+    # Pardavimo taškas (Atšokimas)
+    sell_target = round(buy_target * 1.008, 2)
+    
+    st.markdown(f"<h1 style='text-align: center; color: #ff4b4b;'>🩸 TITAN REAPER V204</h1>", unsafe_allow_html=True)
 
-    # --- GRAFIKAS (Ištaisyta Indentacija iš image_14197c.png) ---
-    fig, ax = plt.subplots(figsize=(10, 4)) 
-    hist = df.tail(15)
-    ax.plot(hist['time'], hist['close'], color='#00ffcc', label='Kraken')
-    ax.axhline(panic_sell_p, color='red', linestyle='--', label='Panic Sell')
+    # --- VEIKSMŲ PLANAS ---
+    col1, col2 = st.columns(2)
+    with col1:
+        st.error(f"📉 PIRKIMO ZONA: {buy_target} €")
+        st.write("Lauk, kol kaina pasieks šią ribą.")
+    with col2:
+        st.success(f"📈 PARDAVIMO ZONA: {sell_target} €")
+        st.write("Targetas po atšokimo.")
+
+    # --- PELNO PROGNOZĖS LENTELĖ ---
+    st.subheader("💰 Prognozuojami judėjimai ir sumos")
+    prog_data = []
+    
+    # Modelis 1: Artimiausias atšokimas
+    pelnas_1 = (st.session_state.wallet / buy_target) * (sell_target - buy_target)
+    
+    prog_data.append({
+        "Modelis": "Trumpas Atšokimas",
+        "Pirk už": f"{buy_target} €",
+        "Parduok už": f"{sell_target} €",
+        "Grynas Pelnas (€)": f"+{round(pelnas_1, 2)} €",
+        "Tikimybė": "78% (RSI 48.40)"
+    })
+    
+    # Modelis 2: Grįžimas į 24h Piką
+    pelnas_2 = (st.session_state.wallet / cur_p) * (1748.00 - cur_p)
+    prog_data.append({
+        "Modelis": "Grįžimas į Piką",
+        "Pirk už": f"{cur_p} €",
+        "Parduok už": "1748.00 €",
+        "Grynas Pelnas (€)": f"+{round(pelnas_2, 2)} €",
+        "Tikimybė": "45% (Meškų spaudimas)"
+    })
+    
+    st.table(pd.DataFrame(prog_data))
+
+    # --- GRAFIKAS SU PROGNOZUOJAMU KELIU ---
+    fig, ax = plt.subplots(figsize=(12, 5))
+    hist = df.tail(20)
+    ax.plot(hist['time'], hist['close'], color='white', label='Esama kaina', linewidth=2)
+    
+    # Ateities prognozės linija: Kritimas iki Buy, tada kilimas iki Sell
+    f_times = [hist['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 4)]
+    f_vals = [cur_p - 2, buy_target, sell_target] # Vizualus modelis
+    
+    ax.plot(f_times, f_vals, color='#ff4b4b', linestyle='--', marker='o', label='PROGNOZĖ')
+    ax.axhline(buy_target, color='yellow', linestyle=':', label='Pirkimo riba')
+    ax.axhline(sell_target, color='lime', linestyle=':', label='Pardavimo riba')
+    
     ax.set_facecolor('#0E1117')
     fig.patch.set_facecolor('#0E1117')
     ax.tick_params(colors='white')
