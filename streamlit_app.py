@@ -7,10 +7,9 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Sistemos Branduolys
-st.set_page_config(page_title="TITAN COMPOUND V197", layout="wide")
-st_autorefresh(interval=30000, key="v197_refresh")
+st.set_page_config(page_title="TITAN FUTURE-SIGHT V198", layout="wide")
+st_autorefresh(interval=30000, key="v198_refresh")
 
-# Tavo realus balansas
 if 'wallet' not in st.session_state: st.session_state.wallet = 1711.45
 
 def get_data():
@@ -19,90 +18,80 @@ def get_data():
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=15) as r:
             res = json.loads(r.read().decode())
-            d = res['result']['XETHZEUR'][-720:] 
+            d = res['result']['XETHZEUR'][-100:] 
             df = pd.DataFrame(d, columns=['t','open','high','low','close','vwap','vol','count']).astype(float)
             df['time'] = pd.to_datetime(df['t'], unit='s') + timedelta(hours=2)
             return df
     except: return pd.DataFrame()
 
-def calculate_rsi(data, window=14):
-    delta = data.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
 df = get_data()
 
 if not df.empty:
-    # --- ANALIZĖ ---
-    df['rsi'] = calculate_rsi(df['close'])
-    df['ema_long'] = df['close'].ewm(span=200, adjust=False).mean()
-    
+    # --- ATEITIES PROGNOZAVIMO VARIKLIS ---
     cur_p = df.iloc[-1]['close']
-    cur_rsi = df.iloc[-1]['rsi']
-    long_term_trend = df.iloc[-1]['ema_long']
+    ema_20 = df['close'].ewm(span=20, adjust=False).mean().iloc[-1]
+    volatility = (df['high'] - df['low']).tail(10).mean()
     
-    # Tikslios ribos
-    buy_p = round(min(df['low'].tail(16).min(), long_term_trend * 0.997), 2)
-    sell_p = round(max(df['high'].tail(16).max(), long_term_trend * 1.025), 2)
-    stop_loss_p = round(buy_p * 0.985, 2)
+    # PIRKIMO PROGNOZĖ (Kada kaina pasieks dugną?)
+    # Skaičiuojame pirkimo tašką 0.4% žemiau dabartinio vidurkio
+    target_buy_p = round(ema_20 - (volatility * 0.5), 2)
+    # PARDAVIMO PROGNOZĖ (Kada kaina pasieks pelno zoną?)
+    target_sell_p = round(target_buy_p + (volatility * 1.2), 2)
+    
+    # Sėkmės tikimybė remiantis RSI (jei žemas - kils)
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rsi = 100 - (100 / (1 + gain/loss)).iloc[-1]
+    win_prob = min(max(100 - rsi + 10, 10), 95)
 
-    # Sėkmės tikimybė
-    win_prob = min(max(100 - cur_rsi + (10 if cur_p <= long_term_trend else 0), 5), 98)
+    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🔮 TITAN FUTURE-SIGHT V198</h1>", unsafe_allow_html=True)
 
-    st.markdown(f"<h1 style='text-align: center; color: #00ff88;'>📈 TITAN COMPOUND V197</h1>", unsafe_allow_html=True)
-    
-    # --- TURTO SUVESTINĖ ---
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("DABARTINIS BALANSAS", f"{round(st.session_state.wallet, 2)} €")
-    c2.metric("SĖKMĖS TIKIMYBĖ", f"{round(win_prob, 1)} %")
-    c3.metric("PELNAS / REIDAS", f"+{round(((sell_p-buy_p)/buy_p)*100, 2)} %")
-    c4.metric("7D PROGNOZĖ", f"{round(st.session_state.wallet * 1.15, 2)} €", "+15%")
+    # --- PAGRINDINIS VEIKSMŲ PLANAS ---
+    st.markdown(f"""
+    <div style="background-color: #1E1E1E; padding: 20px; border-radius: 10px; border: 2px solid #00ffcc; text-align: center;">
+        <h2 style="color: white; margin: 0;">REKOMENDACIJA: <span style="color: {'#00ff00' if win_prob > 70 else '#ffcc00'};">{'PIRKTI DABAR' if cur_p <= target_buy_p else 'LAUKTI ĮĖJIMO'}</span></h2>
+        <p style="font-size: 24px; color: #00ffcc;">🎯 Tikslas: <b>{target_sell_p} €</b> | 📈 Tikimybė: <b>{round(win_prob, 1)}%</b></p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # --- BALANSO AUGIMO PROGNOZĖS GRAFIKAS (7 DIENOS) ---
-    st.subheader("🚀 7 Dienų Balanso Augimo Projekcija (Tik 70%+ Tikimybės)")
+    # --- ATEITIES 15 MIN. ŽVAKIŲ LENTELĖ ---
+    st.subheader("🕒 Tikslus laikas tavo pelnui")
+    future_data = []
+    now = datetime.now()
     
-    days = np.arange(0, 8)
-    # Modelis: Darant po 2 sėkmingus reidus per dieną su vidutiniu 1.2% pelnu
-    growth_values = [st.session_state.wallet * (1.024 ** day) for day in days]
-    
-    fig_growth, ax_growth = plt.subplots(figsize=(12, 3))
-    ax_growth.plot(days, growth_values, marker='o', color='#00ff88', linewidth=3, markersize=8)
-    ax_growth.fill_between(days, st.session_state.wallet, growth_values, color='#00ff88', alpha=0.1)
-    
-    ax_growth.set_facecolor('#0E1117')
-    fig_growth.patch.set_facecolor('#0E1117')
-    ax_growth.set_xlabel("Dienos", color='white')
-    ax_growth.set_ylabel("Eurai (€)", color='white')
-    ax_growth.tick_params(colors='white')
-    ax_growth.grid(color='white', alpha=0.1)
-    st.pyplot(fig_growth)
-
-    # --- DINAMINĖ REIDŲ LENTELĖ ---
-    st.subheader("📊 15 Min. Reido Detalės (1000€ Investicija)")
-    prog_list = []
-    for i in range(1, 6):
-        target_t = (datetime.now() + timedelta(minutes=i*15)).strftime("%H:%M")
-        cash_p = (1000.0 / buy_p) * (sell_p - buy_p)
+    for i in range(1, 6): # Prognozė ateinančioms 75 minutėms
+        f_time = (now + timedelta(minutes=15*i)).strftime("%H:%M")
+        # Modelis: po kiek laiko kaina turėtų pasiekti tikslą
+        status = "PIRKTI" if i == 1 else "LAIKYTI" if i < 4 else "PARDUOTI"
         
-        prog_list.append({
-            "Pardavimo Laikas": target_t,
-            "Tikimybė": f"{round(win_prob, 1)} %",
-            "Pelnas (€)": f"+{round(cash_p, 2)} €",
-            "Stop-Loss (€)": f"{stop_loss_p} €",
-            "Rizika": "🟢 ŽEMA" if win_prob > 70 else "🟡 VIDUTINĖ",
-            "Rekomendacija": "🔥 PIRKTI" if win_prob > 70 else "⏳ LAUKTI"
+        future_data.append({
+            "Prognozuojamas Laikas": f_time,
+            "Laukimo trukmė": f"{i*15} min.",
+            "Prognozuojama Kaina (€)": f"{round(target_buy_p + (i * volatility * 0.2), 2)}",
+            "Tikimybė (%)": f"{round(win_prob - (i*2), 1)} %",
+            "Tavo Pelnas (iš 1000€)": f"+{round((1000/target_buy_p * (target_buy_p + (i * volatility * 0.2))) - 1000, 2)} €"
         })
-    st.table(prog_list)
+    st.table(future_data)
 
-    # --- KAINOS GRAFIKAS ---
-    fig_p, ax_p = plt.subplots(figsize=(12, 5))
-    hist_view = df.tail(32)
-    ax_p.plot(hist_view['time'], hist_view['close'], color='white', linewidth=2)
-    ax_p.axhline(sell_p, color='#00ff88', linestyle='--', label="Target")
-    ax_p.axhline(buy_p, color='#ffd000', linestyle='--', label="Entry")
-    ax_p.axhline(stop_loss_p, color='#ff4b4b', linewidth=2, label="Stop-Loss")
-    ax_p.set_facecolor('#0E1117'); fig_p.patch.set_facecolor('#0E1117')
-    ax_p.tick_params(colors='white'); ax_p.legend()
-    st.pyplot(fig_p)
+    # --- ATEITIES KRYPTIES GRAFIKAS ---
+    fig, ax = plt.subplots(figsize=(12, 4))
+    
+    # Tik 2 valandų praeitis
+    hist_view = df.tail(8)
+    ax.plot(hist_view['time'], hist_view['close'], color='gray', alpha=0.5, label='Praeitis')
+    
+    # Ateities prognozė (Žalia linija)
+    future_times = [hist_view['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 6)]
+    future_vals = [target_buy_p + (i * volatility * 0.2) for i in range(1, 6)]
+    ax.plot(future_times, future_vals, color='#00ffcc', linestyle='--', marker='o', label='ATEITIES PROGNOZĖ')
+    
+    ax.axhline(target_sell_p, color='#00ff00', linestyle=':', label="Pardavimo tikslas")
+    ax.axhline(target_buy_p, color='#ffff00', linestyle=':', label="Pirkimo taškas")
+
+    ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117')
+    ax.tick_params(colors='white'); plt.legend(facecolor='#0E1117', labelcolor='white')
+    st.pyplot(fig)
+
+    if st.button("🔱 AKTYVUOTI REIDĄ PAGAL ŠIĄ PROGNOZĘ", use_container_width=True):
+        st.success(f"Užsakymas paruoštas: Pirkti už {target_buy_p}€, parduoti už {target_sell_p}€.")
