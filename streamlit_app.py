@@ -7,11 +7,10 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Branduolys
-st.set_page_config(page_title="TITAN VICTORY V208", layout="wide")
-st_autorefresh(interval=30000, key="v208_refresh")
+st.set_page_config(page_title="TITAN LOGIC V209", layout="wide")
+st_autorefresh(interval=30000, key="v209_refresh")
 
-if 'wallet' not in st.session_state: 
-    st.session_state.wallet = 1711.45
+if 'wallet' not in st.session_state: st.session_state.wallet = 1711.45
 
 def get_data():
     try:
@@ -28,48 +27,55 @@ def get_data():
 df = get_data()
 
 if not df.empty:
-    cur_p = df.iloc[-1]['close'] # Dabartinė kaina ~1,749.83€
-    new_high = 1758.64 # Naujas pikas
-    support_p = 1746.80 # Naujas palaikymas
+    cur_p = df.iloc[-1]['close'] # ~1,749.83€
+    support_level = 1746.80 # Paskutinis dugnas
+    resistance_level = 1758.64 # Naujas pikas
     
-    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🏆 TITAN VICTORY V208</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center; color: #ffcc00;'>🧠 TITAN LOGIC V209</h1>", unsafe_allow_html=True)
 
-    # --- STATUSAS ---
-    col1, col2 = st.columns(2)
-    with col1:
-        st.success(f"🚀 NAUJAS PIKAS: {new_high} €")
-        st.write("Rinka patvirtino pirkimo modelį.")
-    with col2:
-        profit_now = (st.session_state.wallet / 1728.77 * cur_p) - st.session_state.wallet if cur_p > 1728.77 else 0
-        st.metric("POTENCIALUS PELNAS", f"+{round(profit_now, 2)} €")
+    # --- LOGIKOS ANALIZATORIUS ---
+    c1, c2 = st.columns(2)
+    with c1:
+        if cur_p > support_level:
+            st.success(f"✅ LOGIKA: TRENDAS KILANTIS. Kaina laikosi virš {support_level} €")
+        else:
+            st.error(f"❌ LOGIKA: TRENDAS LŪŽO. Kaina nukrito žemiau {support_level} €")
+    
+    with c2:
+        rsi_val = 60.17 # Iš tavo foto
+        st.metric("RSI BŪSENA", f"{rsi_val}", "ERDVĖS KILIMUI YRA" if rsi_val < 70 else "PERKAITA")
 
-    # --- 4 VALANDŲ PROGNOZĖ (ATNAUJINTA) ---
-    st.subheader("🕒 Tolimesnė eiga: Ar kils iki 1,770€?")
-    future_data = []
+    # --- 4 VALANDŲ SCENARIJAI ---
+    st.subheader("📊 Loginiai Scenarijai (Pelnas su 1711.45€)")
     vol = (df['high'] - df['low']).tail(5).mean()
     
+    logic_table = []
     for i in range(1, 17):
         f_time = (datetime.now() + timedelta(minutes=15*i)).strftime("%H:%M")
-        # Modelis: Konsolidacija virš 1,746€
-        f_price = round(cur_p + (vol * 0.3 * i), 2)
-        future_data.append({
+        # Loginis modelis: Lėtas kilimas link 1,770€ arba stabilizacija
+        f_price = round(cur_p + (vol * 0.25 * i), 2)
+        pelnas = (st.session_state.wallet / cur_p * f_price) - st.session_state.wallet
+        
+        logic_table.append({
             "Laikas": f_time,
             "Prognozė": f"{f_price} €",
-            "Veiksmas": "🔥 LAIKYTI" if f_price > support_p else "⚠️ PARDUOTI"
+            "Pelnas (€)": f"+{round(pelnas, 2)} €",
+            "Sprendimas": "LAIKYTI" if f_price > resistance_level else "LAUKTI"
         })
-    st.table(pd.DataFrame(future_data[::2]))
+    st.dataframe(pd.DataFrame(logic_table[::2]), use_container_width=True)
 
-    # --- GRAFIKAS ---
+    # --- VAIZDINĖ LOGIKA ---
     fig, ax = plt.subplots(figsize=(10, 4))
-    hist = df.tail(8) # 2 valandos praeities
-    ax.plot(hist['time'], hist['close'], color='white', label='Istorija', linewidth=2)
+    hist = df.tail(8)
+    ax.plot(hist['time'], hist['close'], color='white', label='Istorija (2 val.)')
     
+    # Prognozės linija
     f_times = [hist['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 17)]
-    f_vals = [cur_p + (vol * 0.3 * i) for i in range(1, 17)]
-    ax.plot(f_times, f_vals, color='#00ffcc', linestyle='--', marker='o', label='Tęsinys')
+    f_vals = [cur_p + (vol * 0.25 * i) for i in range(1, 17)]
+    ax.plot(f_times, f_vals, color='#ffcc00', linestyle='--', label='Loginis kelias')
     
-    ax.axhline(new_high, color='gold', linestyle=':', label='Pikas')
-    ax.axhline(support_p, color='red', linestyle=':', label='Saugiklis (1746€)')
+    ax.axhline(support_level, color='red', linestyle=':', label='STOP LOSS (1746€)')
+    ax.axhline(resistance_level, color='cyan', linestyle=':', label='BREAKOUT (1758€)')
     
     ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117')
     ax.tick_params(colors='white'); ax.legend(facecolor='#0E1117', labelcolor='white')
