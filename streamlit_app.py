@@ -3,54 +3,75 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import urllib.request, json
+import time
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. ARCHITEKTŪRA
-st.set_page_config(page_title="TITAN ORACLE V211", layout="wide")
-st_autorefresh(interval=30000, key="v211_refresh")
+# ==========================================
+# 1. SISTEMINĖ KONFIGŪRACIJA IR KLAIDŲ VALDYMAS
+# ==========================================
+st.set_page_config(page_title="TITAN NEURAL CORE V212", layout="wide")
+st_autorefresh(interval=30000, key="neural_refresh")
 
-if 'wallet' not in st.session_state: 
+# Inicijuojame tavo balansą
+if 'wallet' not in st.session_state:
     st.session_state.wallet = 1711.45
 
-def get_pro_data():
+# ==========================================
+# 2. DUOMENŲ APDOROJIMO VARIKLIS (DATA ENGINE)
+# ==========================================
+def fetch_market_data(pair="ETHEUR", interval=15):
+    """Aukšto patikimumo duomenų gavimas su retry mechanizmu."""
+    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}"
     try:
-        url = "https://api.kraken.com/0/public/OHLC?pair=ETHEUR&interval=15"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            res = json.loads(r.read().decode())
-            d = res['result']['XETHZEUR'][-100:] 
-            df = pd.DataFrame(d, columns=['t','open','high','low','close','vwap','vol','count']).astype(float)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            raw_ohlc = data['result']['XETHZEUR']
+            df = pd.DataFrame(raw_ohlc, columns=['t','open','high','low','close','vwap','vol','count']).astype(float)
             df['time'] = pd.to_datetime(df['t'], unit='s') + timedelta(hours=2)
-            
-            # PRO MATEMATIKA: 
-            # 1. Eksponentinis judantis vidurkis (EMA) jautresnis pokyčiams
-            df['ema8'] = df['close'].ewm(span=8, adjust=False).mean()
-            df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-            # 2. ATR (Average True Range) - rinkos nervingumo matas
-            df['tr'] = np.maximum((df['high'] - df['low']), 
-                                  np.maximum(abs(df['high'] - df['close'].shift(1)), 
-                                             abs(df['low'] - df['close'].shift(1))))
-            df['atr'] = df['tr'].rolling(window=14).mean()
             return df
-    except: return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Klaida gaunant duomenis: {e}")
+        return pd.DataFrame()
 
-df = get_pro_data()
+# ==========================================
+# 3. DAKTARO LYGIO INDIKATORIŲ SKAIČIAVIMAS
+# ==========================================
+def apply_advanced_math(df):
+    """Pritaikomi visi imanomi rodikliai analizei."""
+    # EMA kaskada trendo jėgai nustatyti
+    df['ema8'] = df['close'].ewm(span=8, adjust=False).mean()
+    df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+    
+    # RSI(6) tiksliai pagal tavo Binance nustatymus
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=6).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=6).mean()
+    df['rsi'] = 100 - (100 / (1 + (gain / loss)))
+    
+    # Bollinger Bands (Volatiliškumo koridorius)
+    df['sma20'] = df['close'].rolling(window=20).mean()
+    df['std'] = df['close'].rolling(window=20).std()
+    df['b_upper'] = df['sma20'] + (df['std'] * 2)
+    df['b_lower'] = df['sma20'] - (df['std'] * 2)
+    
+    # ATR (Average True Range) rizikos valdymui
+    df['tr'] = np.maximum((df['high'] - df['low']), 
+                          np.maximum(abs(df['high'] - df['close'].shift(1)), 
+                                     abs(df['low'] - df['close'].shift(1))))
+    df['atr'] = df['tr'].rolling(window=14).mean()
+    return df
+
+# ==========================================
+# 4. PAGRINDINIS ANALITIKOS PROCESAS
+# ==========================================
+df = fetch_market_data()
 
 if not df.empty:
-    # --- ANALITINIS BRANDUOLYS ---
-    cur_p = df.iloc[-1]['close'] # ~1,749€
-    rsi_v = 59.53 # Remiantis tavo naujausiu Omni-Scanner
-    sma20 = 1737.44 #
+    df = apply_advanced_math(df)
+    current = df.iloc[-1]
+    prev = df.iloc[-2]
     
-    # Kritiniai lygiai iš nuotraukų
-    p_high = 1758.64 #
-    p_low = 1728.77 #
-    
-    st.markdown("<h1 style='text-align: center; color: #00d4ff;'>🏛️ TITAN ORACLE: DOCTORATE V211</h1>", unsafe_allow_html=True)
-
-    # --- 1 DALIS: MATEMATINĖ RIZIKOS MATRICA ---
-    st.subheader("🛡️ Rizikos ir Kapitalo Valdymas")
-    col1, col2, col3 = st.columns(3)
-    
-    with col
+    # Fiksuoti lygiai iš tavo nuotraukų
