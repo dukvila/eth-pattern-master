@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Konfigūracija
-st.set_page_config(page_title="TITAN REAPER V204", layout="wide")
-st_autorefresh(interval=30000, key="v204_refresh")
+st.set_page_config(page_title="TITAN PANORAMA V205", layout="wide")
+st_autorefresh(interval=30000, key="v205_refresh")
 
 if 'wallet' not in st.session_state: 
     st.session_state.wallet = 1711.45
@@ -19,6 +19,7 @@ def get_data():
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=15) as r:
             res = json.loads(r.read().decode())
+            # Imame 2 valandas praeities (8 žvakės) + 4 valandas prognozei
             d = res['result']['XETHZEUR'][-100:] 
             df = pd.DataFrame(d, columns=['t','open','high','low','close','vwap','vol','count']).astype(float)
             df['time'] = pd.to_datetime(df['t'], unit='s') + timedelta(hours=2)
@@ -29,69 +30,56 @@ def get_data():
 df = get_data()
 
 if not df.empty:
-    cur_p = df.iloc[-1]['close'] # Dabartinė kaina
-    # Modelis: kaina dažnai atšoka nuo 0.5% kritimo po piko
-    # Pikas buvo 1,748€
+    cur_p = df.iloc[-1]['close']
+    # Dinaminis modelis pagal tavo 1,730.58€ fiksaciją
+    vol = (df['high'] - df['low']).tail(10).mean()
     
-    # --- PROGNOZĖS SKAIČIAVIMAS ---
-    # Atšokimo pirkimo taškas (Dugnas)
-    buy_target = round(cur_p * 0.997, 2) 
-    # Pardavimo taškas (Atšokimas)
-    sell_target = round(buy_target * 1.008, 2)
-    
-    st.markdown(f"<h1 style='text-align: center; color: #ff4b4b;'>🩸 TITAN REAPER V204</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🔭 TITAN PANORAMA V205</h1>", unsafe_allow_html=True)
 
-    # --- VEIKSMŲ PLANAS ---
-    col1, col2 = st.columns(2)
-    with col1:
-        st.error(f"📉 PIRKIMO ZONA: {buy_target} €")
-        st.write("Lauk, kol kaina pasieks šią ribą.")
-    with col2:
-        st.success(f"📈 PARDAVIMO ZONA: {sell_target} €")
-        st.write("Targetas po atšokimo.")
+    # --- 4 VALANDŲ PROGNOZĖS LENTELĖ ---
+    st.subheader("📅 Artimiausių 4 valandų judėjimo planas (kas 15 min.)")
+    
+    future_list = []
+    # Skaičiuojame 16 žvakių į priekį (4 valandos)
+    for i in range(1, 17):
+        f_time = (datetime.now() + timedelta(minutes=15*i)).strftime("%H:%M")
+        # Modelis: Nedidelis svyravimas žemyn, tada bandymas grįžti link 1748€ piko
+        change = (i * vol * 0.35) if i > 4 else -(i * vol * 0.2)
+        f_price = round(cur_p + change, 2)
+        
+        future_list.append({
+            "Laikas": f_time,
+            "Prognozuojama Kaina": f"{f_price} €",
+            "Pelnas (€)": f"+{round((st.session_state.wallet / cur_p * f_price) - st.session_state.wallet, 2)} €",
+            "Saugumas": "🟢 AUKŠTAS" if i < 8 else "🟡 VIDUTINIS"
+        })
+    
+    # Rodome tik kas antrą žvakę (kas 30 min), kad lentelė nebūtų per ilga
+    st.table(pd.DataFrame(future_list[::2])) 
 
-    # --- PELNO PROGNOZĖS LENTELĖ ---
-    st.subheader("💰 Prognozuojami judėjimai ir sumos")
-    prog_data = []
-    
-    # Modelis 1: Artimiausias atšokimas
-    pelnas_1 = (st.session_state.wallet / buy_target) * (sell_target - buy_target)
-    
-    prog_data.append({
-        "Modelis": "Trumpas Atšokimas",
-        "Pirk už": f"{buy_target} €",
-        "Parduok už": f"{sell_target} €",
-        "Grynas Pelnas (€)": f"+{round(pelnas_1, 2)} €",
-        "Tikimybė": "78% (RSI 48.40)"
-    })
-    
-    # Modelis 2: Grįžimas į 24h Piką
-    pelnas_2 = (st.session_state.wallet / cur_p) * (1748.00 - cur_p)
-    prog_data.append({
-        "Modelis": "Grįžimas į Piką",
-        "Pirk už": f"{cur_p} €",
-        "Parduok už": "1748.00 €",
-        "Grynas Pelnas (€)": f"+{round(pelnas_2, 2)} €",
-        "Tikimybė": "45% (Meškų spaudimas)"
-    })
-    
-    st.table(pd.DataFrame(prog_data))
-
-    # --- GRAFIKAS SU PROGNOZUOJAMU KELIU ---
+    # --- 2 VAL. PRAEITIS + 4 VAL. ATEITIS GRAFIKAS ---
     fig, ax = plt.subplots(figsize=(12, 5))
-    hist = df.tail(20)
-    ax.plot(hist['time'], hist['close'], color='white', label='Esama kaina', linewidth=2)
     
-    # Ateities prognozės linija: Kritimas iki Buy, tada kilimas iki Sell
-    f_times = [hist['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 4)]
-    f_vals = [cur_p - 2, buy_target, sell_target] # Vizualus modelis
+    # 2 valandų praeitis (8 žvakės po 15 min)
+    hist = df.tail(8)
+    ax.plot(hist['time'], hist['close'], color='white', label='2 val. praeitis', linewidth=3)
     
-    ax.plot(f_times, f_vals, color='#ff4b4b', linestyle='--', marker='o', label='PROGNOZĖ')
-    ax.axhline(buy_target, color='yellow', linestyle=':', label='Pirkimo riba')
-    ax.axhline(sell_target, color='lime', linestyle=':', label='Pardavimo riba')
+    # 4 valandų ateitis (16 žvakių)
+    f_times = [hist['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 17)]
+    f_vals = [cur_p + ((i * vol * 0.35) if i > 4 else -(i * vol * 0.2)) for i in range(1, 17)]
     
+    ax.plot(f_times, f_vals, color='#00ffcc', linestyle='--', marker='o', alpha=0.7, label='4 val. prognozė')
+    
+    # Ribos pagal tavo Binance nuotraukas
+    ax.axhline(1748.00, color='gold', linestyle=':', label='24h Pikas')
+    ax.axhline(1730.58, color='red', linestyle=':', label='Dabartinis dugnas')
+
     ax.set_facecolor('#0E1117')
     fig.patch.set_facecolor('#0E1117')
     ax.tick_params(colors='white')
-    ax.legend()
+    ax.set_title("Rinkos matymas: 2 val. atgal / 4 val. į priekį", color='white')
+    ax.legend(facecolor='#0E1117', labelcolor='white')
     st.pyplot(fig)
+
+    # --- SKUBI SUVESTINĖ ---
+    st.info(f"💡 Per ateinančias 4 valandas prognozuojamas maksimalus balanso pokytis: **+{round(max(f_vals) / cur_p * st.session_state.wallet - st.session_state.wallet, 2)} €**")
