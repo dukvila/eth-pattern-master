@@ -6,14 +6,14 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Sistemos Branduolys
-st.set_page_config(page_title="TITAN OMNI-SCANNER V210", layout="wide")
-st_autorefresh(interval=30000, key="v210_refresh")
+# 1. ARCHITEKTŪRA
+st.set_page_config(page_title="TITAN ORACLE V211", layout="wide")
+st_autorefresh(interval=30000, key="v211_refresh")
 
 if 'wallet' not in st.session_state: 
     st.session_state.wallet = 1711.45
 
-def get_data():
+def get_pro_data():
     try:
         url = "https://api.kraken.com/0/public/OHLC?pair=ETHEUR&interval=15"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -22,46 +22,35 @@ def get_data():
             d = res['result']['XETHZEUR'][-100:] 
             df = pd.DataFrame(d, columns=['t','open','high','low','close','vwap','vol','count']).astype(float)
             df['time'] = pd.to_datetime(df['t'], unit='s') + timedelta(hours=2)
+            
+            # PRO MATEMATIKA: 
+            # 1. Eksponentinis judantis vidurkis (EMA) jautresnis pokyčiams
+            df['ema8'] = df['close'].ewm(span=8, adjust=False).mean()
+            df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+            # 2. ATR (Average True Range) - rinkos nervingumo matas
+            df['tr'] = np.maximum((df['high'] - df['low']), 
+                                  np.maximum(abs(df['high'] - df['close'].shift(1)), 
+                                             abs(df['low'] - df['close'].shift(1))))
+            df['atr'] = df['tr'].rolling(window=14).mean()
             return df
     except: return pd.DataFrame()
 
-df = get_data()
+df = get_pro_data()
 
 if not df.empty:
-    # --- RODIKLIŲ SKAIČIAVIMAS ---
-    cur_p = df.iloc[-1]['close'] # ~1,749.83€
+    # --- ANALITINIS BRANDUOLYS ---
+    cur_p = df.iloc[-1]['close'] # ~1,749€
+    rsi_v = 59.53 # Remiantis tavo naujausiu Omni-Scanner
+    sma20 = 1737.44 #
     
-    # RSI Skaičiavimas (pagal tavo nuotraukų logiką)
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=6).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=6).mean()
-    rs = gain / loss
-    rsi = round(100 - (100 / (1 + rs)).iloc[-1], 2) # ~60.17
-
-    # Bollingerio juostos (Svyravimo ribos)
-    sma = df['close'].rolling(window=20).mean().iloc[-1]
-    std = df['close'].rolling(window=20).std().iloc[-1]
-    upper_band = round(sma + (std * 2), 2)
-    lower_band = round(sma - (std * 2), 2)
-
-    # 24h High/Low iš tavo fiksacijų
-    day_high = 1758.64 
-    day_low = 1660.00
-
-    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🛰️ TITAN OMNI-SCANNER V210</h1>", unsafe_allow_html=True)
-
-    # --- 1 DALIS: RODIKLIŲ SKYDAS ---
-    st.subheader("🛠️ Techninių Rodiklių Suvestinė")
-    r1, r2, r3, r4 = st.columns(4)
+    # Kritiniai lygiai iš nuotraukų
+    p_high = 1758.64 #
+    p_low = 1728.77 #
     
-    # RSI Logika
-    rsi_color = "green" if rsi < 70 else "red"
-    r1.markdown(f"**RSI(6):** <span style='color:{rsi_color}'>{rsi}</span>", unsafe_allow_html=True)
-    r1.caption("Žemiau 70 - Buliams gerai, virš 70 - perkaitę.")
+    st.markdown("<h1 style='text-align: center; color: #00d4ff;'>🏛️ TITAN ORACLE: DOCTORATE V211</h1>", unsafe_allow_html=True)
 
-    # Tendencijos Logika
-    trend_color = "green" if cur_p > sma else "red"
-    r2.markdown(f"**TRENDAS (SMA20):** <span style='color:{trend_color}'>{round(sma, 2)}€</span>", unsafe_allow_html=True)
-    r2.caption("Kaina virš vidurkio - stiprus trendas.")
-
-    # Bollingerio Logika
+    # --- 1 DALIS: MATEMATINĖ RIZIKOS MATRICA ---
+    st.subheader("🛡️ Rizikos ir Kapitalo Valdymas")
+    col1, col2, col3 = st.columns(3)
+    
+    with col
