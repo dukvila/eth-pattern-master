@@ -6,9 +6,9 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Konfigūracija
-st.set_page_config(page_title="TITAN PANORAMA V205", layout="wide")
-st_autorefresh(interval=30000, key="v205_refresh")
+# 1. Sistemos Branduolys
+st.set_page_config(page_title="TITAN CHRONOS V206", layout="wide")
+st_autorefresh(interval=30000, key="v206_refresh")
 
 if 'wallet' not in st.session_state: 
     st.session_state.wallet = 1711.45
@@ -19,7 +19,6 @@ def get_data():
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=15) as r:
             res = json.loads(r.read().decode())
-            # Imame 2 valandas praeities (8 žvakės) + 4 valandas prognozei
             d = res['result']['XETHZEUR'][-100:] 
             df = pd.DataFrame(d, columns=['t','open','high','low','close','vwap','vol','count']).astype(float)
             df['time'] = pd.to_datetime(df['t'], unit='s') + timedelta(hours=2)
@@ -30,56 +29,57 @@ def get_data():
 df = get_data()
 
 if not df.empty:
-    cur_p = df.iloc[-1]['close']
-    # Dinaminis modelis pagal tavo 1,730.58€ fiksaciją
+    cur_p = df.iloc[-1]['close'] # Dabartinė kaina apie 1,733€
     vol = (df['high'] - df['low']).tail(10).mean()
     
-    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🔭 TITAN PANORAMA V205</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>⏳ TITAN CHRONOS V206</h1>", unsafe_allow_html=True)
 
-    # --- 4 VALANDŲ PROGNOZĖS LENTELĖ ---
-    st.subheader("📅 Artimiausių 4 valandų judėjimo planas (kas 15 min.)")
+    # --- TIKSLUS VEIKSMŲ PLANAS ---
+    st.subheader("💰 KADA PIRKTI IR PARDUOTI (Modelis: Atšokimas į 1748€)")
     
-    future_list = []
-    # Skaičiuojame 16 žvakių į priekį (4 valandos)
-    for i in range(1, 17):
+    # Modelis remiasi tavo nuotraukose matytu 24h piku - 1,748€
+    target_p = 1748.00
+    expected_profit = (st.session_state.wallet / cur_p * target_p) - st.session_state.wallet
+    
+    c1, c2 = st.columns(2)
+    c1.warning(f"📥 PIRKTI DABAR: {cur_p} €")
+    c2.success(f"📤 PARDUOTI TIES: {target_p} € (Pelnas: +{round(expected_profit, 2)} €)")
+
+    # --- 4 VALANDŲ PROGNOZĖS LENTELĖ (KAS 15 MIN.) ---
+    st.subheader("📅 4 Valandų Detali Prognozė")
+    future_data = []
+    for i in range(1, 17): # 16 žvakių = 4 valandos
         f_time = (datetime.now() + timedelta(minutes=15*i)).strftime("%H:%M")
-        # Modelis: Nedidelis svyravimas žemyn, tada bandymas grįžti link 1748€ piko
-        change = (i * vol * 0.35) if i > 4 else -(i * vol * 0.2)
-        f_price = round(cur_p + change, 2)
+        # Modelis: lėtas kilimas po stabilizacijos
+        f_price = round(cur_p + (vol * 0.45 * i), 2)
+        pelnas = (st.session_state.wallet / cur_p * f_price) - st.session_state.wallet
         
-        future_list.append({
+        future_data.append({
             "Laikas": f_time,
-            "Prognozuojama Kaina": f"{f_price} €",
-            "Pelnas (€)": f"+{round((st.session_state.wallet / cur_p * f_price) - st.session_state.wallet, 2)} €",
-            "Saugumas": "🟢 AUKŠTAS" if i < 8 else "🟡 VIDUTINIS"
+            "Prognozė": f"{f_price} €",
+            "Suma Balanse": f"{round(st.session_state.wallet + pelnas, 2)} €",
+            "Grynas Pelnas": f"+{round(pelnas, 2)} €"
         })
     
-    # Rodome tik kas antrą žvakę (kas 30 min), kad lentelė nebūtų per ilga
-    st.table(pd.DataFrame(future_list[::2])) 
+    # Rodome visą lentelę su slinktimi
+    st.dataframe(pd.DataFrame(future_data), use_container_width=True)
 
-    # --- 2 VAL. PRAEITIS + 4 VAL. ATEITIS GRAFIKAS ---
+    # --- 2 VAL. PRAEITIS + 4 VAL. ATEITIS ---
     fig, ax = plt.subplots(figsize=(12, 5))
     
-    # 2 valandų praeitis (8 žvakės po 15 min)
+    # Rodome 8 žvakes (2 valandas) praeities
     hist = df.tail(8)
-    ax.plot(hist['time'], hist['close'], color='white', label='2 val. praeitis', linewidth=3)
+    ax.plot(hist['time'], hist['close'], color='white', label='Istorija (2 val.)', linewidth=2)
     
-    # 4 valandų ateitis (16 žvakių)
+    # 4 valandų prognozės linija
     f_times = [hist['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 17)]
-    f_vals = [cur_p + ((i * vol * 0.35) if i > 4 else -(i * vol * 0.2)) for i in range(1, 17)]
+    f_vals = [cur_p + (vol * 0.45 * i) for i in range(1, 17)]
+    ax.plot(f_times, f_vals, color='#00ffcc', linestyle='--', marker='o', label='Prognozė (4 val.)')
     
-    ax.plot(f_times, f_vals, color='#00ffcc', linestyle='--', marker='o', alpha=0.7, label='4 val. prognozė')
-    
-    # Ribos pagal tavo Binance nuotraukas
-    ax.axhline(1748.00, color='gold', linestyle=':', label='24h Pikas')
-    ax.axhline(1730.58, color='red', linestyle=':', label='Dabartinis dugnas')
+    # Kritinės ribos iš tavo grafikų
+    ax.axhline(1748.00, color='gold', linestyle=':', label='Dienos pikas (1748€)')
+    ax.axhline(1730.58, color='red', linestyle=':', label='Dabartinis palaikymas (1730€)')
 
-    ax.set_facecolor('#0E1117')
-    fig.patch.set_facecolor('#0E1117')
-    ax.tick_params(colors='white')
-    ax.set_title("Rinkos matymas: 2 val. atgal / 4 val. į priekį", color='white')
-    ax.legend(facecolor='#0E1117', labelcolor='white')
+    ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117')
+    ax.tick_params(colors='white'); ax.legend(facecolor='#0E1117', labelcolor='white')
     st.pyplot(fig)
-
-    # --- SKUBI SUVESTINĖ ---
-    st.info(f"💡 Per ateinančias 4 valandas prognozuojamas maksimalus balanso pokytis: **+{round(max(f_vals) / cur_p * st.session_state.wallet - st.session_state.wallet, 2)} €**")
