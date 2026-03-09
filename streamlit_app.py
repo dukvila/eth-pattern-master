@@ -6,11 +6,12 @@ import urllib.request, json
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Branduolys
-st.set_page_config(page_title="TITAN LOGIC V209", layout="wide")
-st_autorefresh(interval=30000, key="v209_refresh")
+# 1. Sistemos Branduolys
+st.set_page_config(page_title="TITAN OMNI-SCANNER V210", layout="wide")
+st_autorefresh(interval=30000, key="v210_refresh")
 
-if 'wallet' not in st.session_state: st.session_state.wallet = 1711.45
+if 'wallet' not in st.session_state: 
+    st.session_state.wallet = 1711.45
 
 def get_data():
     try:
@@ -27,56 +28,40 @@ def get_data():
 df = get_data()
 
 if not df.empty:
+    # --- RODIKLIŲ SKAIČIAVIMAS ---
     cur_p = df.iloc[-1]['close'] # ~1,749.83€
-    support_level = 1746.80 # Paskutinis dugnas
-    resistance_level = 1758.64 # Naujas pikas
     
-    st.markdown(f"<h1 style='text-align: center; color: #ffcc00;'>🧠 TITAN LOGIC V209</h1>", unsafe_allow_html=True)
+    # RSI Skaičiavimas (pagal tavo nuotraukų logiką)
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=6).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=6).mean()
+    rs = gain / loss
+    rsi = round(100 - (100 / (1 + rs)).iloc[-1], 2) # ~60.17
 
-    # --- LOGIKOS ANALIZATORIUS ---
-    c1, c2 = st.columns(2)
-    with c1:
-        if cur_p > support_level:
-            st.success(f"✅ LOGIKA: TRENDAS KILANTIS. Kaina laikosi virš {support_level} €")
-        else:
-            st.error(f"❌ LOGIKA: TRENDAS LŪŽO. Kaina nukrito žemiau {support_level} €")
-    
-    with c2:
-        rsi_val = 60.17 # Iš tavo foto
-        st.metric("RSI BŪSENA", f"{rsi_val}", "ERDVĖS KILIMUI YRA" if rsi_val < 70 else "PERKAITA")
+    # Bollingerio juostos (Svyravimo ribos)
+    sma = df['close'].rolling(window=20).mean().iloc[-1]
+    std = df['close'].rolling(window=20).std().iloc[-1]
+    upper_band = round(sma + (std * 2), 2)
+    lower_band = round(sma - (std * 2), 2)
 
-    # --- 4 VALANDŲ SCENARIJAI ---
-    st.subheader("📊 Loginiai Scenarijai (Pelnas su 1711.45€)")
-    vol = (df['high'] - df['low']).tail(5).mean()
-    
-    logic_table = []
-    for i in range(1, 17):
-        f_time = (datetime.now() + timedelta(minutes=15*i)).strftime("%H:%M")
-        # Loginis modelis: Lėtas kilimas link 1,770€ arba stabilizacija
-        f_price = round(cur_p + (vol * 0.25 * i), 2)
-        pelnas = (st.session_state.wallet / cur_p * f_price) - st.session_state.wallet
-        
-        logic_table.append({
-            "Laikas": f_time,
-            "Prognozė": f"{f_price} €",
-            "Pelnas (€)": f"+{round(pelnas, 2)} €",
-            "Sprendimas": "LAIKYTI" if f_price > resistance_level else "LAUKTI"
-        })
-    st.dataframe(pd.DataFrame(logic_table[::2]), use_container_width=True)
+    # 24h High/Low iš tavo fiksacijų
+    day_high = 1758.64 
+    day_low = 1660.00
 
-    # --- VAIZDINĖ LOGIKA ---
-    fig, ax = plt.subplots(figsize=(10, 4))
-    hist = df.tail(8)
-    ax.plot(hist['time'], hist['close'], color='white', label='Istorija (2 val.)')
+    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🛰️ TITAN OMNI-SCANNER V210</h1>", unsafe_allow_html=True)
+
+    # --- 1 DALIS: RODIKLIŲ SKYDAS ---
+    st.subheader("🛠️ Techninių Rodiklių Suvestinė")
+    r1, r2, r3, r4 = st.columns(4)
     
-    # Prognozės linija
-    f_times = [hist['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 17)]
-    f_vals = [cur_p + (vol * 0.25 * i) for i in range(1, 17)]
-    ax.plot(f_times, f_vals, color='#ffcc00', linestyle='--', label='Loginis kelias')
-    
-    ax.axhline(support_level, color='red', linestyle=':', label='STOP LOSS (1746€)')
-    ax.axhline(resistance_level, color='cyan', linestyle=':', label='BREAKOUT (1758€)')
-    
-    ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117')
-    ax.tick_params(colors='white'); ax.legend(facecolor='#0E1117', labelcolor='white')
-    st.pyplot(fig)
+    # RSI Logika
+    rsi_color = "green" if rsi < 70 else "red"
+    r1.markdown(f"**RSI(6):** <span style='color:{rsi_color}'>{rsi}</span>", unsafe_allow_html=True)
+    r1.caption("Žemiau 70 - Buliams gerai, virš 70 - perkaitę.")
+
+    # Tendencijos Logika
+    trend_color = "green" if cur_p > sma else "red"
+    r2.markdown(f"**TRENDAS (SMA20):** <span style='color:{trend_color}'>{round(sma, 2)}€</span>", unsafe_allow_html=True)
+    r2.caption("Kaina virš vidurkio - stiprus trendas.")
+
+    # Bollingerio Logika
