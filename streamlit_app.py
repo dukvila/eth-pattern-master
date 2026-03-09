@@ -3,64 +3,55 @@ import ccxt
 import pandas as pd
 import pandas_ta as ta
 import plotly.graph_objects as go
-from datetime import datetime
 
-st.set_page_config(page_title="ETH Analizė", layout="wide")
+# 1. Priverstinis teksto rodymas (kad žinotume, jog programa veikia)
+st.write("🔄 Programa paleista. Tikrinami duomenys...")
 
-# Funkcija patikrinti, ar viskas įrašyta
-def check_setup():
-    st.write("🔍 Tikrinama sistema...")
+# 2. Bibliotekų tikrinimas
+try:
+    import ccxt
+    import pandas_ta
+    st.sidebar.success("✅ Bibliotekos rastos")
+except Exception as e:
+    st.error(f"❌ Trūksta bibliotekų! Įsitikink, kad faile requirements.txt įrašei: ccxt, pandas_ta. Klaida: {e}")
+    st.stop()
+
+# 3. Saugi duomenų gavimo funkcija
+def get_data_simple():
     try:
-        import ccxt
-        import pandas_ta
-        st.success("Sistemos bibliotekos paruoštos!")
-    except ImportError as e:
-        st.error(f"Trūksta bibliotekos: {e}")
-
-st.title("📊 ETH/EUR Realaus laiko grafikas")
-
-# Debug mygtukas (jei nieko nematysi, paspausk)
-if st.checkbox("Rodyti sistemos būseną"):
-    check_setup()
-
-@st.cache_data(ttl=15)
-def get_data():
-    try:
-        ex = ccxt.binance()
-        # Bandom gauti duomenis
-        bars = ex.fetch_ohlcv('ETH/EUR', timeframe='15m', limit=100)
-        df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        exchange = ccxt.binance()
+        # Bandome gauti tik vieną skaičių testui
+        ticker = exchange.fetch_ticker('ETH/EUR')
+        price = ticker['last']
+        
+        # Gauname žvakes
+        ohlcv = exchange.fetch_ohlcv('ETH/EUR', timeframe='15m', limit=50)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['time'] = pd.to_datetime(df['timestamp'], unit='ms')
         
-        # Skaičiuojam indikatorius
+        # Skaičiuojame tik tai, kas būtina
         df['rsi'] = ta.rsi(df['close'], length=6)
-        df['sma20'] = ta.sma(df['close'], length=20)
-        df['ema9'] = ta.ema(df['close'], length=9)
-        return df
+        return df, price
     except Exception as e:
-        st.error(f"Nepavyko gauti duomenų iš Binance: {e}")
-        return None
+        st.error(f"❌ Nepavyko prisijungti prie Binance: {e}")
+        return None, None
 
-data = get_data()
+df, current_price = get_data_simple()
 
-if data is not None:
-    # Rodikliai
-    c1, c2 = st.columns(2)
-    c1.metric("Kaina", f"{data['close'].iloc[-1]} EUR")
-    rsi_val = data['rsi'].iloc[-1]
+if df is not None:
+    st.header(f"ETH Kaina: {current_price} EUR")
     
+    rsi_val = df['rsi'].iloc[-1]
     if rsi_val < 70:
-        c2.success(f"RSI: {rsi_val:.2f} (PIRKTI)")
+        st.success(f"Signalas: PIRKTI (RSI: {rsi_val:.2f})")
     else:
-        c2.warning(f"RSI: {rsi_val:.2f} (PERPIRKTA)")
+        st.warning(f"Signalas: LAUKTI (RSI: {rsi_val:.2f})")
 
-    # Grafikas
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=data['time'], open=data['open'], high=data['high'], 
-                                 low=data['low'], close=data['close'], name='ETH'))
-    fig.add_trace(go.Scatter(x=data['time'], y=data['sma20'], line=dict(color='yellow'), name='SMA20'))
-    fig.add_trace(go.Scatter(x=data['time'], y=data['ema9'], line=dict(color='cyan'), name='EMA9'))
-    fig.update_layout(template="plotly_dark", height=600)
+    # Paprastas grafikas
+    fig = go.Figure(data=[go.Candlestick(x=df['time'],
+                open=df['open'], high=df['high'],
+                low=df['low'], close=df['close'])])
+    fig.update_layout(template="plotly_dark", title="ETH/EUR 15m")
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info("Laukiama duomenų... Jei langas tuščias ilgai, patikrink internetą.")
+    st.warning("⚠️ Duomenys nerodomi. Patikrinkite pranešimą viršuje.")
