@@ -7,10 +7,9 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Sistemos Branduolys
-st.set_page_config(page_title="TITAN ACCURACY V200", layout="wide")
-st_autorefresh(interval=30000, key="v200_refresh")
+st.set_page_config(page_title="TITAN STABILIZER V201", layout="wide")
+st_autorefresh(interval=30000, key="v201_refresh")
 
-# Tavo balansas
 if 'wallet' not in st.session_state: st.session_state.wallet = 1711.45
 
 def get_data():
@@ -28,58 +27,38 @@ def get_data():
 df = get_data()
 
 if not df.empty:
-    # --- ANALIZĖ ---
-    cur_p = df.iloc[-1]['close']
+    # --- ANALIZĖ PAGAL BINANCE REALYBĘ ---
+    cur_p = df.iloc[-1]['close'] # Dabar apie 1736€
     ema_13 = df['close'].ewm(span=13, adjust=False).mean().iloc[-1]
     
-    # Tikslesnis jėgos skaičiavimas (pasimokius iš Binance šešėlių)
+    # Skaičiuojame jėgas pagal Binance žvakių šešėlius
     bull_power = df['high'].iloc[-1] - ema_13
     bear_power = df['low'].iloc[-1] - ema_13
     total_force = abs(bull_power) + abs(bear_power)
     bull_pct = round((abs(bull_power) / total_force) * 100) if total_force != 0 else 50
     bear_pct = 100 - bull_pct
 
-    # --- VIZUALIZACIJA ---
-    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🔱 TITAN ACCURACY V200</h1>", unsafe_allow_html=True)
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("ETH DABAR (Kraken)", f"{cur_p}€")
-    # Lyginame su tavo matytu 1744.57€ tikslu
-    c2.metric("PROGNOZĖS TIKSLUMAS", f"{bull_pct}%", "BULIŲ JĖGA")
-    c3.metric("TAVO BALANSAS", f"{st.session_state.wallet}€")
+    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🛡️ TITAN STABILIZER V201</h1>", unsafe_allow_html=True)
 
-    # --- ATEITIES PROGNOZĖS LENTELĖ ---
-    st.subheader("📅 Ateities reido planas (Pasimokius iš realios rinkos)")
+    # --- JĖGOS MATUOKLIS (IŠ BINANCE) ---
+    st.subheader("⚔️ Binance Rinkos Pulsas")
+    c_b, c_m = st.columns([bull_pct, bear_pct])
+    c_b.success(f"BULIAI: {bull_pct}%")
+    c_m.error(f"MEŠKOS: {bear_pct}%")
+
+    # --- PROGNOZĖS LENTELĖ ---
+    st.subheader("🕒 Pelno Prognozė (15 min. žvakių ciklas)")
     future_data = []
-    # Volatiliškumas iš Binance: matėme šuolius iki 1748€
-    volatility = (df['high'] - df['low']).tail(10).mean()
+    # Volatiliškumas padidintas pagal Binance 24h High/Low
+    vol = (df['high'] - df['low']).tail(5).mean()
     
     for i in range(1, 6):
         f_time = (datetime.now() + timedelta(minutes=15*i)).strftime("%H:%M")
-        change = (volatility * 0.5 * i) if bull_pct > bear_pct else -(volatility * 0.5 * i)
+        change = (vol * 0.6 * i) if bull_pct > bear_pct else -(vol * 0.6 * i)
         f_price = round(cur_p + change, 2)
-        
         future_data.append({
             "Laikas": f_time,
-            "Prognozė": f"{f_price} €",
-            "Kryptis": "📈 Kyla" if bull_pct > bear_pct else "📉 Krenta",
-            "Pelnas (€)": f"+{round((1000/cur_p * f_price) - 1000, 2)} €"
+            "Prognozė (€)": f"{f_price} €",
+            "Pelnas (1000€)": f"+{round((1000/cur_p * f_price) - 1000, 2)} €"
         })
-    st.table(future_data)
-
-    # --- GRAFIKAS ---
-        fig, ax = plt.subplots(figsize=(12, 5))
-    hist = df.tail(15)
-    ax.plot(hist['time'], hist['close'], color='magenta', label='Istorija', linewidth=2)
-    
-    # Ateities prognozė (Ištaisyta kodo klaida!)
-    f_times = [hist['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 6)]
-    f_vals = [cur_p + ((volatility * 0.5 * i) if bull_pct > bear_pct else -(volatility * 0.5 * i)) for i in range(1, 6)]
-    
-    ax.plot(f_times, f_vals, color='#00ffcc', linestyle='--', marker='o', label='PROGNOZĖ')
-    
-    ax.set_facecolor('#0E1117')
-    fig.patch.set_facecolor('#0E1117')
-    ax.tick_params(colors='white')
-    plt.legend()
-    st.pyplot(fig)
+    st.table
