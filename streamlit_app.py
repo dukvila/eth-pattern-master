@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Sistemos Branduolys
-st.set_page_config(page_title="TITAN FUTURE-SIGHT V198", layout="wide")
-st_autorefresh(interval=30000, key="v198_refresh")
+st.set_page_config(page_title="TITAN SENTINEL V199", layout="wide")
+st_autorefresh(interval=30000, key="v199_refresh")
 
 if 'wallet' not in st.session_state: st.session_state.wallet = 1711.45
 
@@ -27,71 +27,62 @@ def get_data():
 df = get_data()
 
 if not df.empty:
-    # --- ATEITIES PROGNOZAVIMO VARIKLIS ---
+    # --- BULIŲ / MEŠKŲ JĖGOS SKAIČIAVIMAS ---
     cur_p = df.iloc[-1]['close']
-    ema_20 = df['close'].ewm(span=20, adjust=False).mean().iloc[-1]
-    volatility = (df['high'] - df['low']).tail(10).mean()
+    ema_13 = df['close'].ewm(span=13, adjust=False).mean().iloc[-1]
     
-    # PIRKIMO PROGNOZĖ (Kada kaina pasieks dugną?)
-    # Skaičiuojame pirkimo tašką 0.4% žemiau dabartinio vidurkio
-    target_buy_p = round(ema_20 - (volatility * 0.5), 2)
-    # PARDAVIMO PROGNOZĖ (Kada kaina pasieks pelno zoną?)
-    target_sell_p = round(target_buy_p + (volatility * 1.2), 2)
+    bull_power = df['high'].iloc[-1] - ema_13
+    bear_power = df['low'].iloc[-1] - ema_13
     
-    # Sėkmės tikimybė remiantis RSI (jei žemas - kils)
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rsi = 100 - (100 / (1 + gain/loss)).iloc[-1]
-    win_prob = min(max(100 - rsi + 10, 10), 95)
+    # Normalizuojame jėgą (0-100%)
+    total_force = abs(bull_power) + abs(bear_power)
+    bull_pct = round((abs(bull_power) / total_force) * 100) if total_force != 0 else 50
+    bear_pct = 100 - bull_pct
 
-    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🔮 TITAN FUTURE-SIGHT V198</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center; color: #00ffcc;'>🛡️ TITAN SENTINEL V199</h1>", unsafe_allow_html=True)
 
-    # --- PAGRINDINIS VEIKSMŲ PLANAS ---
-    st.markdown(f"""
-    <div style="background-color: #1E1E1E; padding: 20px; border-radius: 10px; border: 2px solid #00ffcc; text-align: center;">
-        <h2 style="color: white; margin: 0;">REKOMENDACIJA: <span style="color: {'#00ff00' if win_prob > 70 else '#ffcc00'};">{'PIRKTI DABAR' if cur_p <= target_buy_p else 'LAUKTI ĮĖJIMO'}</span></h2>
-        <p style="font-size: 24px; color: #00ffcc;">🎯 Tikslas: <b>{target_sell_p} €</b> | 📈 Tikimybė: <b>{round(win_prob, 1)}%</b></p>
-    </div>
-    """, unsafe_allow_html=True)
+    # --- JĖGOS MATUOKLIS (VIZUALUS) ---
+    st.subheader("⚔️ Rinkos Jėgų Pusiausvyra (Kas 15 min.)")
+    col_bull, col_bear = st.columns([bull_pct, bear_pct])
+    col_bull.markdown(f"<div style='background-color: #00ff00; text-align: center; padding: 10px; border-radius: 5px 0 0 5px; color: black;'><b>BULIAI: {bull_pct}%</b></div>", unsafe_allow_html=True)
+    col_bear.markdown(f"<div style='background-color: #ff4b4b; text-align: center; padding: 10px; border-radius: 0 5px 5px 0; color: white;'><b>MEŠKOS: {bear_pct}%</b></div>", unsafe_allow_html=True)
 
-    # --- ATEITIES 15 MIN. ŽVAKIŲ LENTELĖ ---
-    st.subheader("🕒 Tikslus laikas tavo pelnui")
+    # --- DINAMINĖ PROGNOZĖ PAGAL JĖGĄ ---
+    trend_dir = "KILIMAS" if bull_pct > bear_pct else "KRITIMAS"
+    trend_col = "#00ff00" if trend_dir == "KILIMAS" else "#ff4b4b"
+    
+    st.markdown(f"<h3 style='text-align: center;'>Dabartinė kryptis: <span style='color: {trend_col};'>{trend_dir}</span></h3>", unsafe_allow_html=True)
+
+    # --- ATEITIES LENTELĖ SU KRYPTIES KEITIMU ---
+    st.subheader("🕒 Tikslus laikas ir prognozuojama kaina")
     future_data = []
-    now = datetime.now()
+    volatility = (df['high'] - df['low']).tail(5).mean()
     
-    for i in range(1, 6): # Prognozė ateinančioms 75 minutėms
-        f_time = (now + timedelta(minutes=15*i)).strftime("%H:%M")
-        # Modelis: po kiek laiko kaina turėtų pasiekti tikslą
-        status = "PIRKTI" if i == 1 else "LAIKYTI" if i < 4 else "PARDUOTI"
+    for i in range(1, 6):
+        f_time = (datetime.now() + timedelta(minutes=15*i)).strftime("%H:%M")
+        # Jei meškos stipresnės, kaina prognozuojama žemyn
+        price_change = (volatility * 0.4 * i) if bull_pct > bear_pct else -(volatility * 0.4 * i)
+        f_price = round(cur_p + price_change, 2)
         
         future_data.append({
-            "Prognozuojamas Laikas": f_time,
-            "Laukimo trukmė": f"{i*15} min.",
-            "Prognozuojama Kaina (€)": f"{round(target_buy_p + (i * volatility * 0.2), 2)}",
-            "Tikimybė (%)": f"{round(win_prob - (i*2), 1)} %",
-            "Tavo Pelnas (iš 1000€)": f"+{round((1000/target_buy_p * (target_buy_p + (i * volatility * 0.2))) - 1000, 2)} €"
+            "Laikas": f_time,
+            "Prognozuojama Kaina (€)": f"{f_price} €",
+            "Kryptis": "📈 Kyla" if bull_pct > bear_pct else "📉 Krenta",
+            "Tikimybė": f"{max(bull_pct, bear_pct)} %",
+            "Pelnas (€) iš 1000€": f"{round((1000/cur_p * f_price) - 1000, 2)} €"
         })
     st.table(future_data)
 
-    # --- ATEITIES KRYPTIES GRAFIKAS ---
+    # --- GRAFIKAS ---
     fig, ax = plt.subplots(figsize=(12, 4))
+    hist_view = df.tail(10)
+    ax.plot(hist_view['time'], hist_view['close'], color='white', label='Istorija')
     
-    # Tik 2 valandų praeitis
-    hist_view = df.tail(8)
-    ax.plot(hist_view['time'], hist_view['close'], color='gray', alpha=0.5, label='Praeitis')
-    
-    # Ateities prognozė (Žalia linija)
-    future_times = [hist_view['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 6)]
-    future_vals = [target_buy_p + (i * volatility * 0.2) for i in range(1, 6)]
-    ax.plot(future_times, future_vals, color='#00ffcc', linestyle='--', marker='o', label='ATEITIES PROGNOZĖ')
-    
-    ax.axhline(target_sell_p, color='#00ff00', linestyle=':', label="Pardavimo tikslas")
-    ax.axhline(target_buy_p, color='#ffff00', linestyle=':', label="Pirkimo taškas")
+    # Ateities prognozės linija (keičia kryptį!)
+    f_times = [hist_view['time'].iloc[-1] + timedelta(minutes=15*i) for i in range(1, 6)]
+    f_vals = [cur_p + ((volatility * 0.4 * i) if bull_pct > bear_pct else -(volatility * 0.4 * i)) for i in range(1, 6)]
+    ax.plot(f_times, f_vals, color=trend_col, linestyle='--', marker='o', label=f'Prognozuojamas {trend_dir}')
 
     ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117')
-    ax.tick_params(colors='white'); plt.legend(facecolor='#0E1117', labelcolor='white')
+    ax.tick_params(colors='white'); plt.legend()
     st.pyplot(fig)
-
-    if st.button("🔱 AKTYVUOTI REIDĄ PAGAL ŠIĄ PROGNOZĘ", use_container_width=True):
-        st.success(f"Užsakymas paruoštas: Pirkti už {target_buy_p}€, parduoti už {target_sell_p}€.")
